@@ -1,0 +1,56 @@
+//@version=6
+indicator("Swing High/Low Dots - Jestin V James", overlay = true)
+
+// === User Inputs ===
+
+// === User Inputs ===
+highColor = input.color(color.red, "Swing High Color")
+lowColor  = input.color(color.green, "Swing Low Color")
+
+sizeOption = input.string("small", "Dot Size",
+     options = ["tiny", "small", "normal", "large", "huge"])
+
+// === Swing Detection ===
+isSwingLow  = low[2] > low[1] and low[1] < low
+isSwingHigh = high[2] < high[1] and high[1] > high
+
+// === Plot with size selection ===
+plotshape(isSwingLow and sizeOption == "tiny",
+     style=shape.circle, location=location.belowbar,
+     color=lowColor, size=size.tiny, offset=-1, display=display.pane)
+
+plotshape(isSwingLow and sizeOption == "small",
+     style=shape.circle, location=location.belowbar,
+     color=lowColor, size=size.small, offset=-1, display=display.pane)
+
+plotshape(isSwingLow and sizeOption == "normal",
+     style=shape.circle, location=location.belowbar,
+     color=lowColor, size=size.normal, offset=-1, display=display.pane)
+
+plotshape(isSwingLow and sizeOption == "large",
+     style=shape.circle, location=location.belowbar,
+     color=lowColor, size=size.large, offset=-1, display=display.pane)
+
+plotshape(isSwingLow and sizeOption == "huge",
+     style=shape.circle, location=location.belowbar,
+     color=lowColor, size=size.huge, offset=-1, display=display.pane)
+
+plotshape(isSwingHigh and sizeOption == "tiny",
+     style=shape.circle, location=location.abovebar,
+     color=highColor, size=size.tiny, offset=-1, display=display.pane)
+
+plotshape(isSwingHigh and sizeOption == "small",
+     style=shape.circle, location=location.abovebar,
+     color=highColor, size=size.small, offset=-1, display=display.pane)
+
+plotshape(isSwingHigh and sizeOption == "normal",
+     style=shape.circle, location=location.abovebar,
+     color=highColor, size=size.normal, offset=-1, display=display.pane)
+
+plotshape(isSwingHigh and sizeOption == "large",
+     style=shape.circle, location=location.abovebar,
+     color=highColor, size=size.large, offset=-1, display=display.pane)
+
+plotshape(isSwingHigh and sizeOption == "huge",
+     style=shape.circle, location=location.abovebar,
+     color=highColor, size=size.huge, offset=-1, display=display.pane)

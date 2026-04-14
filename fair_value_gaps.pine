@@ -38,8 +38,10 @@ if array.size(bearBoxes) > 0
 // === Detect and draw Bullish FVG ===
 // 3-candle pattern: candle1=bar[2], candle2=bar[1], candle3=bar[0]
 // Condition: low of candle3 > high of candle1
+// open[1] <= high[2] ensures candle2 did not gap open above candle1
+// open[0] <= high[1] ensures candle3 did not gap open above candle2
 // Gap zone: bottom = high[2], top = low[0]
-if low[0] > high[2]
+if low[0] > high[2] and open[1] <= high[2] and open[0] <= high[1]
     gapTop = low[0]
     gapBot = high[2]
     b = box.new(bar_index[2], gapTop, bar_index, gapBot,
@@ -51,8 +53,10 @@ if low[0] > high[2]
 // === Detect and draw Bearish FVG ===
 // 3-candle pattern: candle1=bar[2], candle2=bar[1], candle3=bar[0]
 // Condition: high of candle3 < low of candle1
+// open[1] >= low[2] ensures candle2 did not gap open below candle1
+// open[0] >= low[1] ensures candle3 did not gap open below candle2
 // Gap zone: bottom = high[0], top = low[2]
-if high[0] < low[2]
+if high[0] < low[2] and open[1] >= low[2] and open[0] >= low[1]
     gapTop = low[2]
     gapBot = high[0]
     b = box.new(bar_index[2], gapTop, bar_index, gapBot,

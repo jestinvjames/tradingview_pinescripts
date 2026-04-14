@@ -2,55 +2,35 @@
 indicator("Swing High/Low Dots - Jestin V James", overlay = true)
 
 // === User Inputs ===
-
-// === User Inputs ===
 highColor = input.color(color.red, "Swing High Color")
 lowColor  = input.color(color.green, "Swing Low Color")
 
 sizeOption = input.string("small", "Dot Size",
      options = ["tiny", "small", "normal", "large", "huge"])
 
-// === Swing Detection ===
-isSwingLow  = low[2] > low[1] and low[1] < low
-isSwingHigh = high[2] < high[1] and high[1] > high
+// === Single Swing Detection (pivot at bar[2], 2 candles before and after) ===
+isSwingLow  = low[4]  > low[2]  and low[3]  > low[2]  and low[1]  > low[2]  and low[0]  > low[2]
+isSwingHigh = high[4] < high[2] and high[3] < high[2] and high[1] < high[2] and high[0] < high[2]
 
-// === Plot with size selection ===
-plotshape(isSwingLow and sizeOption == "tiny",
-     style=shape.circle, location=location.belowbar,
-     color=lowColor, size=size.tiny, offset=-1, display=display.pane)
+// === Equal Pair Detection (pair spans bar[3] and bar[2]) ===
+// Both candles share the same low/high, and it is lower/higher than
+// the 2 candles before the pair (bar[5], bar[4]) and 2 candles after (bar[1], bar[0]).
+// The circle is placed on the second (last) candle of the pair — bar[2], offset=-2.
+isEqualLowPair  = low[3]  == low[2]  and low[2]  < low[5]  and low[2]  < low[4]  and low[2]  < low[1]  and low[2]  < low[0]
+isEqualHighPair = high[3] == high[2] and high[2] > high[5] and high[2] > high[4] and high[2] > high[1] and high[2] > high[0]
 
-plotshape(isSwingLow and sizeOption == "small",
-     style=shape.circle, location=location.belowbar,
-     color=lowColor, size=size.small, offset=-1, display=display.pane)
+isMarkLow  = isSwingLow  or isEqualLowPair
+isMarkHigh = isSwingHigh or isEqualHighPair
 
-plotshape(isSwingLow and sizeOption == "normal",
-     style=shape.circle, location=location.belowbar,
-     color=lowColor, size=size.normal, offset=-1, display=display.pane)
+// === Plot (editable=false hides these from the Style panel) ===
+plotshape(isMarkLow  and sizeOption == "tiny",   style=shape.circle, location=location.belowbar,  color=lowColor,  size=size.tiny,   offset=-2, editable=false)
+plotshape(isMarkLow  and sizeOption == "small",  style=shape.circle, location=location.belowbar,  color=lowColor,  size=size.small,  offset=-2, editable=false)
+plotshape(isMarkLow  and sizeOption == "normal", style=shape.circle, location=location.belowbar,  color=lowColor,  size=size.normal, offset=-2, editable=false)
+plotshape(isMarkLow  and sizeOption == "large",  style=shape.circle, location=location.belowbar,  color=lowColor,  size=size.large,  offset=-2, editable=false)
+plotshape(isMarkLow  and sizeOption == "huge",   style=shape.circle, location=location.belowbar,  color=lowColor,  size=size.huge,   offset=-2, editable=false)
 
-plotshape(isSwingLow and sizeOption == "large",
-     style=shape.circle, location=location.belowbar,
-     color=lowColor, size=size.large, offset=-1, display=display.pane)
-
-plotshape(isSwingLow and sizeOption == "huge",
-     style=shape.circle, location=location.belowbar,
-     color=lowColor, size=size.huge, offset=-1, display=display.pane)
-
-plotshape(isSwingHigh and sizeOption == "tiny",
-     style=shape.circle, location=location.abovebar,
-     color=highColor, size=size.tiny, offset=-1, display=display.pane)
-
-plotshape(isSwingHigh and sizeOption == "small",
-     style=shape.circle, location=location.abovebar,
-     color=highColor, size=size.small, offset=-1, display=display.pane)
-
-plotshape(isSwingHigh and sizeOption == "normal",
-     style=shape.circle, location=location.abovebar,
-     color=highColor, size=size.normal, offset=-1, display=display.pane)
-
-plotshape(isSwingHigh and sizeOption == "large",
-     style=shape.circle, location=location.abovebar,
-     color=highColor, size=size.large, offset=-1, display=display.pane)
-
-plotshape(isSwingHigh and sizeOption == "huge",
-     style=shape.circle, location=location.abovebar,
-     color=highColor, size=size.huge, offset=-1, display=display.pane)
+plotshape(isMarkHigh and sizeOption == "tiny",   style=shape.circle, location=location.abovebar, color=highColor, size=size.tiny,   offset=-2, editable=false)
+plotshape(isMarkHigh and sizeOption == "small",  style=shape.circle, location=location.abovebar, color=highColor, size=size.small,  offset=-2, editable=false)
+plotshape(isMarkHigh and sizeOption == "normal", style=shape.circle, location=location.abovebar, color=highColor, size=size.normal, offset=-2, editable=false)
+plotshape(isMarkHigh and sizeOption == "large",  style=shape.circle, location=location.abovebar, color=highColor, size=size.large,  offset=-2, editable=false)
+plotshape(isMarkHigh and sizeOption == "huge",   style=shape.circle, location=location.abovebar, color=highColor, size=size.huge,   offset=-2, editable=false)

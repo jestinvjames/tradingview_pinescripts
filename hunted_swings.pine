@@ -58,9 +58,11 @@ var float huntSL_lvl  = na   // level of the visible hunted-SL line (for mitigat
 if isMarkHigh
     if not na(lastSH) and high[2] > lastSH
         // New SH is higher: the old SH was swept on the way up.
-        // Move it to pending — it will be confirmed hunted on close below.
-        pendingSH   := lastSH
-        pendingSH_i := lastSH_i
+        // Keep the LOWER of existing pendingSH vs lastSH — the lowest swept
+        // level is the meaningful liquidity pool; newer higher ones are skipped.
+        if na(pendingSH) or lastSH < pendingSH
+            pendingSH   := lastSH
+            pendingSH_i := lastSH_i
     lastSH   := high[2]
     lastSH_i := bar_index - 2
     shSwept  := false
@@ -102,8 +104,11 @@ if not na(huntSHLine)
 if isMarkLow
     if not na(lastSL) and low[2] < lastSL
         // New SL is lower: the old SL was swept on the way down.
-        pendingSL   := lastSL
-        pendingSL_i := lastSL_i
+        // Keep the HIGHER of existing pendingSL vs lastSL — the highest swept
+        // level is the meaningful liquidity pool; newer lower ones are skipped.
+        if na(pendingSL) or lastSL > pendingSL
+            pendingSL   := lastSL
+            pendingSL_i := lastSL_i
     lastSL   := low[2]
     lastSL_i := bar_index - 2
     slSwept  := false

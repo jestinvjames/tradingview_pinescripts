@@ -1,0 +1,140 @@
+//@version=6
+indicator("Recently Hunted Swing High/Low", overlay=true)
+
+// === Inputs ===
+shColor   = input.color(color.red,              "Hunted Swing High Color")
+slColor   = input.color(color.teal,             "Hunted Swing Low Color")
+lineWidth = input.int(2, "Line Width",           minval=1, maxval=4)
+styleOpt  = input.string("dashed", "Line Style", options=["solid", "dashed", "dotted"])
+
+lstyle = switch styleOpt
+    "solid"  => line.style_solid
+    "dashed" => line.style_dashed
+    => line.style_dotted
+
+// === Swing Detection — 2-bar rule + equal pairs (same as swing_high_low_dots) ===
+isSwingHigh     = high[4] < high[2] and high[3] < high[2] and high[1] < high[2] and high[0] < high[2]
+isSwingLow      = low[4]  > low[2]  and low[3]  > low[2]  and low[1]  > low[2]  and low[0]  > low[2]
+isEqualHighPair = high[3] == high[2] and high[2] > high[5] and high[2] > high[4] and high[2] > high[1] and high[2] > high[0]
+isEqualLowPair  = low[3]  == low[2]  and low[2]  < low[5]  and low[2]  < low[4]  and low[2]  < low[1]  and low[2]  < low[0]
+isMarkHigh = isSwingHigh or isEqualHighPair
+isMarkLow  = isSwingLow  or isEqualLowPair
+
+// ═══════════════════════════════════════════════════════════════════
+// SWING HIGH HUNT STATE
+//
+// Two candidates are tracked simultaneously:
+//   lastSH    — the most recent swing high, watching for a direct sweep
+//   pendingSH — an older SH that was indirectly swept when a NEW HIGHER
+//               swing high formed above it; waiting for close-below confirmation
+//
+// Hunt conditions:
+//   Direct:  price sweeps above lastSH (high > lastSH) then closes below it
+//   Pending: a newer, higher SH formed above pendingSH (indirectly sweeping it);
+//            confirmed hunted when price closes below pendingSH
+// ═══════════════════════════════════════════════════════════════════
+var float lastSH      = na   // level of current tracked swing high
+var int   lastSH_i    = na   // bar index where it was detected
+var bool  shSwept     = false // true once high > lastSH
+var float pendingSH   = na   // indirectly-swept SH awaiting close-below
+var int   pendingSH_i = na
+var line  huntSHLine  = na   // the one visible hunted-SH line
+var float huntSH_lvl  = na   // level of the visible hunted-SH line (for mitigation)
+
+// ═══════════════════════════════════════════════════════════════════
+// SWING LOW HUNT STATE  (mirror of above)
+// ═══════════════════════════════════════════════════════════════════
+var float lastSL      = na
+var int   lastSL_i    = na
+var bool  slSwept     = false
+var float pendingSL   = na
+var int   pendingSL_i = na
+var line  huntSLLine  = na
+var float huntSL_lvl  = na   // level of the visible hunted-SL line (for mitigation)
+
+// ─── SWING HIGH LOGIC ───────────────────────────────────────────────────────
+
+// Step 1 — new swing high confirmed
+if isMarkHigh
+    if not na(lastSH) and high[2] > lastSH
+        // New SH is higher: the old SH was swept on the way up.
+        // Move it to pending — it will be confirmed hunted on close below.
+        pendingSH   := lastSH
+        pendingSH_i := lastSH_i
+    lastSH   := high[2]
+    lastSH_i := bar_index - 2
+    shSwept  := false
+
+// Step 2 — mitigation: price revisits the hunted SH level → remove line
+if not na(huntSH_lvl) and high >= huntSH_lvl
+    line.delete(huntSHLine)
+    huntSHLine := na
+    huntSH_lvl := na
+
+// Step 2b — check if pending SH is now confirmed hunted
+if not na(pendingSH) and close < pendingSH
+    line.delete(huntSHLine)
+    huntSHLine := line.new(pendingSH_i, pendingSH, bar_index, pendingSH,
+         color=shColor, width=lineWidth, style=lstyle)
+    huntSH_lvl := pendingSH
+    pendingSH  := na
+
+// Step 3 — mark sweep when price trades above the current SH
+if not na(lastSH) and high > lastSH
+    shSwept := true
+
+// Step 4 — confirm hunt: swept and now closed back below
+if shSwept and not na(lastSH) and close < lastSH
+    line.delete(huntSHLine)
+    huntSHLine := line.new(lastSH_i, lastSH, bar_index, lastSH,
+         color=shColor, width=lineWidth, style=lstyle)
+    huntSH_lvl := lastSH
+    lastSH     := na
+    shSwept    := false
+
+// Step 5 — extend visible line to the current bar every tick
+if not na(huntSHLine)
+    line.set_x2(huntSHLine, bar_index)
+
+// ─── SWING LOW LOGIC ────────────────────────────────────────────────────────
+
+// Step 1 — new swing low confirmed
+if isMarkLow
+    if not na(lastSL) and low[2] < lastSL
+        // New SL is lower: the old SL was swept on the way down.
+        pendingSL   := lastSL
+        pendingSL_i := lastSL_i
+    lastSL   := low[2]
+    lastSL_i := bar_index - 2
+    slSwept  := false
+
+// Step 2 — mitigation: price revisits the hunted SL level → remove line
+if not na(huntSL_lvl) and low <= huntSL_lvl
+    line.delete(huntSLLine)
+    huntSLLine := na
+    huntSL_lvl := na
+
+// Step 2b — check if pending SL is now confirmed hunted
+if not na(pendingSL) and close > pendingSL
+    line.delete(huntSLLine)
+    huntSLLine := line.new(pendingSL_i, pendingSL, bar_index, pendingSL,
+         color=slColor, width=lineWidth, style=lstyle)
+    huntSL_lvl := pendingSL
+    pendingSL  := na
+
+// Step 3 — mark sweep when price trades below the current SL
+if not na(lastSL) and low < lastSL
+    slSwept := true
+
+// Step 4 — confirm hunt: swept and now closed back above
+if slSwept and not na(lastSL) and close > lastSL
+    line.delete(huntSLLine)
+    huntSLLine := line.new(lastSL_i, lastSL, bar_index, lastSL,
+         color=slColor, width=lineWidth, style=lstyle)
+    huntSL_lvl := lastSL
+    lastSL     := na
+    slSwept    := false
+
+// Step 5 — extend visible line to the current bar every tick
+if not na(huntSLLine)
+    line.set_x2(huntSLLine, bar_index)

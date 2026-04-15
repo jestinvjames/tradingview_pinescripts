@@ -40,6 +40,7 @@ var float pendingSH   = na   // indirectly-swept SH awaiting close-below
 var int   pendingSH_i = na
 var line  huntSHLine  = na   // the one visible hunted-SH line
 var float huntSH_lvl  = na   // level of the visible hunted-SH line (for mitigation)
+var int   huntSH_bar  = na   // bar index when the hunt line was drawn
 
 // ═══════════════════════════════════════════════════════════════════
 // SWING LOW HUNT STATE  (mirror of above)
@@ -51,6 +52,7 @@ var float pendingSL   = na
 var int   pendingSL_i = na
 var line  huntSLLine  = na
 var float huntSL_lvl  = na   // level of the visible hunted-SL line (for mitigation)
+var int   huntSL_bar  = na   // bar index when the hunt line was drawn
 
 // ─── SWING HIGH LOGIC ───────────────────────────────────────────────────────
 
@@ -68,17 +70,21 @@ if isMarkHigh
     shSwept  := false
 
 // Step 2 — mitigation: price revisits the hunted SH level → remove line
-if not na(huntSH_lvl) and high >= huntSH_lvl
+// Guard: only mitigate on bars AFTER the line was drawn (sweep bar's high already exceeded the level)
+if not na(huntSH_lvl) and high >= huntSH_lvl and bar_index > huntSH_bar
     line.delete(huntSHLine)
     huntSHLine := na
     huntSH_lvl := na
+    huntSH_bar := na
 
 // Step 2b — check if pending SH is now confirmed hunted
-if not na(pendingSH) and close < pendingSH
+shHunted = not na(pendingSH) and close < pendingSH
+if shHunted
     line.delete(huntSHLine)
-    huntSHLine := line.new(pendingSH_i, pendingSH, bar_index, pendingSH,
+    huntSHLine := line.new(math.max(pendingSH_i, bar_index - 499), pendingSH, bar_index, pendingSH,
          color=shColor, width=lineWidth, style=lstyle)
     huntSH_lvl := pendingSH
+    huntSH_bar := bar_index
     pendingSH  := na
 
 // Step 3 — mark sweep when price trades above the current SH
@@ -86,11 +92,13 @@ if not na(lastSH) and high > lastSH
     shSwept := true
 
 // Step 4 — confirm hunt: swept and now closed back below
-if shSwept and not na(lastSH) and close < lastSH
+shHuntedDirect = shSwept and not na(lastSH) and close < lastSH
+if shHuntedDirect
     line.delete(huntSHLine)
-    huntSHLine := line.new(lastSH_i, lastSH, bar_index, lastSH,
+    huntSHLine := line.new(math.max(lastSH_i, bar_index - 499), lastSH, bar_index, lastSH,
          color=shColor, width=lineWidth, style=lstyle)
     huntSH_lvl := lastSH
+    huntSH_bar := bar_index
     lastSH     := na
     shSwept    := false
 
@@ -114,17 +122,21 @@ if isMarkLow
     slSwept  := false
 
 // Step 2 — mitigation: price revisits the hunted SL level → remove line
-if not na(huntSL_lvl) and low <= huntSL_lvl
+// Guard: only mitigate on bars AFTER the line was drawn (sweep bar's low already broke the level)
+if not na(huntSL_lvl) and low <= huntSL_lvl and bar_index > huntSL_bar
     line.delete(huntSLLine)
     huntSLLine := na
     huntSL_lvl := na
+    huntSL_bar := na
 
 // Step 2b — check if pending SL is now confirmed hunted
-if not na(pendingSL) and close > pendingSL
+slHunted = not na(pendingSL) and close > pendingSL
+if slHunted
     line.delete(huntSLLine)
-    huntSLLine := line.new(pendingSL_i, pendingSL, bar_index, pendingSL,
+    huntSLLine := line.new(math.max(pendingSL_i, bar_index - 499), pendingSL, bar_index, pendingSL,
          color=slColor, width=lineWidth, style=lstyle)
     huntSL_lvl := pendingSL
+    huntSL_bar := bar_index
     pendingSL  := na
 
 // Step 3 — mark sweep when price trades below the current SL
@@ -132,14 +144,21 @@ if not na(lastSL) and low < lastSL
     slSwept := true
 
 // Step 4 — confirm hunt: swept and now closed back above
-if slSwept and not na(lastSL) and close > lastSL
+slHuntedDirect = slSwept and not na(lastSL) and close > lastSL
+if slHuntedDirect
     line.delete(huntSLLine)
-    huntSLLine := line.new(lastSL_i, lastSL, bar_index, lastSL,
+    huntSLLine := line.new(math.max(lastSL_i, bar_index - 499), lastSL, bar_index, lastSL,
          color=slColor, width=lineWidth, style=lstyle)
     huntSL_lvl := lastSL
+    huntSL_bar := bar_index
     lastSL     := na
     slSwept    := false
 
 // Step 5 — extend visible line to the current bar every tick
 if not na(huntSLLine)
     line.set_x2(huntSLLine, bar_index)
+
+// === Alerts ===
+alertcondition(shHunted or shHuntedDirect, "Swing High Hunted", "Swing High has been hunted")
+alertcondition(slHunted or slHuntedDirect, "Swing Low Hunted",  "Swing Low has been hunted")
+alertcondition(shHunted or shHuntedDirect or slHunted or slHuntedDirect, "Any Swing Hunted", "A swing high or low has been hunted")

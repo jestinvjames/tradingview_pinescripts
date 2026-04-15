@@ -35,13 +35,16 @@ if array.size(bearBoxes) > 0
             array.remove(bearTop,   i)
             array.remove(bearBot,   i)
 
+// === Session open detection ===
+// Apply gap-open filters only when any of the 3 candles is near the session open,
+// to block overnight gap FVGs while allowing intraday micro-gaps through.
+isSessionOpen = session.isfirstbar_regular or session.isfirstbar_regular[1] or session.isfirstbar_regular[2]
+
 // === Detect and draw Bullish FVG ===
 // 3-candle pattern: candle1=bar[2], candle2=bar[1], candle3=bar[0]
 // Condition: low of candle3 > high of candle1
-// open[1] <= high[2] ensures candle2 did not gap open above candle1
-// open[0] <= high[1] ensures candle3 did not gap open above candle2
 // Gap zone: bottom = high[2], top = low[0]
-if low[0] > high[2] and open[1] <= high[2] and open[0] <= high[1]
+if low[0] > high[2] and (not isSessionOpen or (open[1] <= high[2] and open[0] <= high[1]))
     gapTop = low[0]
     gapBot = high[2]
     b = box.new(bar_index[2], gapTop, bar_index, gapBot,
@@ -53,10 +56,8 @@ if low[0] > high[2] and open[1] <= high[2] and open[0] <= high[1]
 // === Detect and draw Bearish FVG ===
 // 3-candle pattern: candle1=bar[2], candle2=bar[1], candle3=bar[0]
 // Condition: high of candle3 < low of candle1
-// open[1] >= low[2] ensures candle2 did not gap open below candle1
-// open[0] >= low[1] ensures candle3 did not gap open below candle2
 // Gap zone: bottom = high[0], top = low[2]
-if high[0] < low[2] and open[1] >= low[2] and open[0] >= low[1]
+if high[0] < low[2] and (not isSessionOpen or (open[1] >= low[2] and open[0] >= low[1]))
     gapTop = low[2]
     gapBot = high[0]
     b = box.new(bar_index[2], gapTop, bar_index, gapBot,

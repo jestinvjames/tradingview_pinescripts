@@ -11,6 +11,14 @@ sizeOption = input.string("small", "Dot Size",
 n = input.int(2, "Lookback/Lookahead Bars", minval=1, maxval=20,
      tooltip="Number of bars before and after the pivot candle used for swing detection. Default is 2.")
 
+// === Regression Line Inputs ===
+showRegLine   = input.bool(false,    "Show Regression Line",  group="Regression Line")
+regTarget     = input.string("Both", "Apply To",              group="Regression Line", options=["Highs", "Lows", "Both"])
+regCount      = input.int(3,         "Number of Pivots",      group="Regression Line", minval=2, maxval=50)
+regColor      = input.color(color.blue, "Line Color",         group="Regression Line")
+regStyleInput = input.string("Dashed", "Line Style",          group="Regression Line", options=["Solid", "Dashed", "Dotted"])
+regWidth      = input.int(1,           "Line Thickness",         group="Regression Line", minval=1, maxval=4)
+
 // === Single Swing Detection (pivot at bar[n], n candles before and after) ===
 isSwingLow  = ta.lowest(low,   n)      > low[n]  and ta.lowest(low,   n)[n + 1] > low[n]
 isSwingHigh = ta.highest(high, n)      < high[n] and ta.highest(high, n)[n + 1] < high[n]
@@ -25,7 +33,7 @@ isEqualHighPair = high[n + 1] == high[n] and ta.highest(high, n)      < high[n] 
 isMarkLow  = isSwingLow  or isEqualLowPair
 isMarkHigh = isSwingHigh or isEqualHighPair
 
-// === Plot (editable=false hides from Style panel; display=display.pane hides from status line) ===
+// === Plot Dots (editable=false hides from Style panel; display=display.pane hides from status line) ===
 plotshape(isMarkLow  and sizeOption == "tiny",   style=shape.circle, location=location.belowbar,  color=lowColor,  size=size.tiny,   offset=-n, editable=false, display=display.pane)
 plotshape(isMarkLow  and sizeOption == "small",  style=shape.circle, location=location.belowbar,  color=lowColor,  size=size.small,  offset=-n, editable=false, display=display.pane)
 plotshape(isMarkLow  and sizeOption == "normal", style=shape.circle, location=location.belowbar,  color=lowColor,  size=size.normal, offset=-n, editable=false, display=display.pane)
@@ -37,3 +45,117 @@ plotshape(isMarkHigh and sizeOption == "small",  style=shape.circle, location=lo
 plotshape(isMarkHigh and sizeOption == "normal", style=shape.circle, location=location.abovebar,  color=highColor, size=size.normal, offset=-n, editable=false, display=display.pane)
 plotshape(isMarkHigh and sizeOption == "large",  style=shape.circle, location=location.abovebar,  color=highColor, size=size.large,  offset=-n, editable=false, display=display.pane)
 plotshape(isMarkHigh and sizeOption == "huge",   style=shape.circle, location=location.abovebar,  color=highColor, size=size.huge,   offset=-n, editable=false, display=display.pane)
+
+// === Regression Line ===
+
+// Accumulate the last regCount pivot bar indices and prices
+var array<int>   highBars   = array.new_int()
+var array<float> highPrices = array.new_float()
+var array<int>   lowBars    = array.new_int()
+var array<float> lowPrices  = array.new_float()
+
+if isMarkHigh
+    array.push(highBars,   bar_index - n)
+    array.push(highPrices, high[n])
+    while array.size(highBars) > regCount
+        array.shift(highBars)
+        array.shift(highPrices)
+
+if isMarkLow
+    array.push(lowBars,   bar_index - n)
+    array.push(lowPrices, low[n])
+    while array.size(lowBars) > regCount
+        array.shift(lowBars)
+        array.shift(lowPrices)
+
+// Least-squares linear regression through the pivot (x, y) pairs.
+// Returns [slope (price per bar), intercept, mean Y].
+linReg(xArr, yArr) =>
+    sz    = array.size(xArr)
+    sumX  = 0.0
+    sumY  = 0.0
+    sumXY = 0.0
+    sumX2 = 0.0
+    for i = 0 to sz - 1
+        xi = float(array.get(xArr, i))
+        yi = array.get(yArr, i)
+        sumX  += xi
+        sumY  += yi
+        sumXY += xi * yi
+        sumX2 += xi * xi
+    denom     = sz * sumX2 - sumX * sumX
+    slope     = denom != 0.0 ? (sz * sumXY - sumX * sumY) / denom : 0.0
+    intercept = (sumY - slope * sumX) / sz
+    meanY     = sumY / sz
+    [slope, intercept, meanY]
+
+lineStyleVal = regStyleInput == "Solid" ? line.style_solid : regStyleInput == "Dotted" ? line.style_dotted : line.style_dashed
+
+var line  highRegLine  = na
+var label highRegLabel = na
+var line  lowRegLine   = na
+var label lowRegLabel  = na
+
+// --- High regression line ---
+showHigh = showRegLine and (regTarget == "Highs" or regTarget == "Both")
+
+if showHigh and array.size(highBars) >= 2
+    [hSlope, hIntercept, hMeanY] = linReg(highBars, highPrices)
+    hX1 = array.get(highBars, 0)
+    hX2 = array.get(highBars, array.size(highBars) - 1)
+    hY1 = hSlope * hX1 + hIntercept
+    hY2 = hSlope * hX2 + hIntercept
+    hNorm    = hMeanY != 0.0 ? (hSlope / hMeanY) * 100.0 : 0.0
+    hSlopeStr = "Highs  " + (hNorm >= 0.0 ? "+" : "") + str.tostring(hNorm, "#.####") + "% /bar"
+    if na(highRegLine)
+        highRegLine  := line.new(hX1, hY1, hX2, hY2, color=regColor, style=lineStyleVal, width=regWidth)
+        highRegLabel := label.new(hX2, hY2, hSlopeStr, color=color.new(regColor, 85), textcolor=regColor, style=label.style_label_left, size=size.small)
+    else
+        line.set_xy1(highRegLine, hX1, hY1)
+        line.set_xy2(highRegLine, hX2, hY2)
+        line.set_color(highRegLine, regColor)
+        line.set_style(highRegLine, lineStyleVal)
+        line.set_width(highRegLine, regWidth)
+        label.set_xy(highRegLabel, hX2, hY2)
+        label.set_text(highRegLabel, hSlopeStr)
+        label.set_textcolor(highRegLabel, regColor)
+        label.set_color(highRegLabel, color.new(regColor, 85))
+else
+    if not na(highRegLine)
+        line.delete(highRegLine)
+        highRegLine := na
+    if not na(highRegLabel)
+        label.delete(highRegLabel)
+        highRegLabel := na
+
+// --- Low regression line ---
+showLow = showRegLine and (regTarget == "Lows" or regTarget == "Both")
+
+if showLow and array.size(lowBars) >= 2
+    [lSlope, lIntercept, lMeanY] = linReg(lowBars, lowPrices)
+    lX1 = array.get(lowBars, 0)
+    lX2 = array.get(lowBars, array.size(lowBars) - 1)
+    lY1 = lSlope * lX1 + lIntercept
+    lY2 = lSlope * lX2 + lIntercept
+    lNorm    = lMeanY != 0.0 ? (lSlope / lMeanY) * 100.0 : 0.0
+    lSlopeStr = "Lows  " + (lNorm >= 0.0 ? "+" : "") + str.tostring(lNorm, "#.####") + "% /bar"
+    if na(lowRegLine)
+        lowRegLine  := line.new(lX1, lY1, lX2, lY2, color=regColor, style=lineStyleVal, width=regWidth)
+        lowRegLabel := label.new(lX2, lY2, lSlopeStr, color=color.new(regColor, 85), textcolor=regColor, style=label.style_label_left, size=size.small)
+    else
+        line.set_xy1(lowRegLine, lX1, lY1)
+        line.set_xy2(lowRegLine, lX2, lY2)
+        line.set_color(lowRegLine, regColor)
+        line.set_style(lowRegLine, lineStyleVal)
+        line.set_width(lowRegLine, regWidth)
+        label.set_xy(lowRegLabel, lX2, lY2)
+        label.set_text(lowRegLabel, lSlopeStr)
+        label.set_textcolor(lowRegLabel, regColor)
+        label.set_color(lowRegLabel, color.new(regColor, 85))
+else
+    if not na(lowRegLine)
+        line.delete(lowRegLine)
+        lowRegLine := na
+    if not na(lowRegLabel)
+        label.delete(lowRegLabel)
+        lowRegLabel := na

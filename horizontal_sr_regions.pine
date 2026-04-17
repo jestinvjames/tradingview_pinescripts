@@ -452,9 +452,9 @@ while idx < array.size(zA_top)
                     wkShow   = array.get(zA_isWeak,  idx)
                     wkAllDec = array.get(zA_allDecr, idx)
                     if (wkShow or wkAllDec) and not curInTest
-                        curMxPrev = array.get(zA_maxPrev, idx)
-                        liveD     = bot - array.get(zA_curTrack, idx)
-                        if curMxPrev > 0.0 and liveD >= curMxPrev
+                        curLastDep = array.get(zA_lastDep, idx)
+                        liveD      = bot - array.get(zA_curTrack, idx)
+                        if curLastDep > 0.0 and liveD >= curLastDep
                             wkShow   := false
                             wkAllDec := false
                     updateWkLbl(wkLb, wkShow, wkAllDec, bot)
@@ -545,9 +545,9 @@ while idx < array.size(zA_top)
                     wkShow   = array.get(zA_isWeak,  idx)
                     wkAllDec = array.get(zA_allDecr, idx)
                     if (wkShow or wkAllDec) and not curInTest
-                        curMxPrev = array.get(zA_maxPrev, idx)
-                        liveD     = array.get(zA_curTrack, idx) - top
-                        if curMxPrev > 0.0 and liveD >= curMxPrev
+                        curLastDep = array.get(zA_lastDep, idx)
+                        liveD      = array.get(zA_curTrack, idx) - top
+                        if curLastDep > 0.0 and liveD >= curLastDep
                             wkShow   := false
                             wkAllDec := false
                     updateWkLbl(wkLb, wkShow, wkAllDec, top)

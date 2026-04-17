@@ -28,26 +28,37 @@ isMarkHigh = _swHigh or _eqHigh
 isMarkLow  = _swLow  or _eqLow
 
 // ─── Zone State Arrays ────────────────────────────────────────────────────────
-// type  : 1 = resistance  /  -1 = support
-// state : 0 = awaiting initial exit from zone
-//         1 = exited; waiting for first test entry
-//         2 = inside first test
-//         3 = first test passed; waiting for second test entry
-//         4 = second (or later) test active → rectangle is visible
-// tests : number of times price entered the zone (incremented on each entry)
-var array<float> zA_top    = array.new_float()
-var array<float> zA_bot    = array.new_float()
-var array<int>   zA_origin = array.new_int()
-var array<int>   zA_type   = array.new_int()
-var array<int>   zA_state  = array.new_int()
-var array<int>   zA_tests  = array.new_int()
-var array<bool>  zA_inTest = array.new_bool()
-var array<box>   zA_box    = array.new<box>()
-var array<label> zA_lbl    = array.new<label>()
+// type     : 1 = resistance  /  -1 = support
+// state    : 0 = awaiting initial exit from zone
+//            1 = exited; waiting for first test entry
+//            2 = inside first test
+//            3 = first test passed; waiting for second test entry
+//            4 = second (or later) test active → rectangle is visible
+// tests    : number of times price entered the zone
+//
+// Depth semantics — depth(test N) = pullback depth BEFORE test N starts:
+//   Resistance: bot − min(low)  from previous-test-end (or initial exit) → test-N entry bar
+//   Support:    max(high) − top from previous-test-end (or initial exit) → test-N entry bar
+//
+// curTrack : running min(low)/max(high) during the current PULLBACK phase.
+//            Tracking is ACTIVE only when price is away from zone (between tests).
+//            Initialized when price exits the zone; saved when the next test begins.
+// depthLog : comma-separated string of saved per-test depths
+var array<float>  zA_top      = array.new_float()
+var array<float>  zA_bot      = array.new_float()
+var array<int>    zA_origin   = array.new_int()
+var array<int>    zA_type     = array.new_int()
+var array<int>    zA_state    = array.new_int()
+var array<int>    zA_tests    = array.new_int()
+var array<bool>   zA_inTest   = array.new_bool()
+var array<float>  zA_curTrack = array.new_float()
+var array<string> zA_depthLog = array.new_string()
+var array<box>    zA_box      = array.new<box>()
+var array<label>  zA_lbl      = array.new<label>()
 
 MAX_ZONES = 50
 
-// ─── Invisible placeholder helpers ───────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 INVIS = color.new(color.white, 100)
 
 makeInvisBox() =>
@@ -56,8 +67,22 @@ makeInvisBox() =>
 makeInvisLabel() =>
     label.new(bar_index, close, "", color=INVIS, textcolor=INVIS)
 
-// ─── activateBox: make a hidden box & label visible for state-4 zones ─────────
-activateBox(bx, lb, origin, top, bot, ztp, tst) =>
+appendDepth(log, d) =>
+    ds = str.tostring(d, "#.##")
+    log == "" ? ds : log + ", " + ds
+
+// Build display string.
+// depthLog = completed test depths. If between tests (not inT), append the live
+// accumulating depth of the NEXT test so the user can watch it build.
+buildDepthStr(dlog, tracker, bot, top, ztp, inT) =>
+    if not inT
+        live = str.tostring(ztp == 1 ? bot - tracker : tracker - top, "#.##")
+        dlog == "" ? live : dlog + ", " + live
+    else
+        dlog
+
+// ─── activateBox ─────────────────────────────────────────────────────────────
+activateBox(bx, lb, origin, top, bot, ztp, tst, dlog, tracker, inT) =>
     zc = ztp == 1 ? i_rColor : i_sColor
     box.set_left(bx,         origin)
     box.set_right(bx,        bar_index)
@@ -68,118 +93,148 @@ activateBox(bx, lb, origin, top, bot, ztp, tst) =>
     box.set_border_width(bx, i_bdrWidth)
     box.set_bgcolor(bx,      color.new(zc, i_bgTrans))
     typeStr = ztp == 1 ? "Resistance" : "Support"
+    dd      = buildDepthStr(dlog, tracker, bot, top, ztp, inT)
     label.set_xy(lb,         bar_index + 1, (top + bot) / 2.0)
-    label.set_text(lb,       typeStr + " Region - " + str.tostring(tst) + " tests")
+    label.set_text(lb,       typeStr + " Region - " + str.tostring(tst) + " tests | Depth: " + dd)
     label.set_color(lb,      color.new(zc, 70))
     label.set_textcolor(lb,  zc)
     label.set_style(lb,      label.style_label_right)
     label.set_size(lb,       size.small)
 
-// ─── addZone: called when a new pivot is detected ─────────────────────────────
-// Replays the bars since the pivot to determine the zone's current state,
-// then adds the zone to the arrays.
+// ─── addZone ─────────────────────────────────────────────────────────────────
+// Depth tracking windows:
+//   State 0→1 (initial exit)   : start tracking
+//   State 1 (away from zone)   : track min(low) / max(high)
+//   State 1→2 (test 1 entry)   : SAVE depth-1, stop tracking during test
+//   State 2→3 (test 1 end)     : start tracking
+//   State 3 (away from zone)   : track
+//   State 3→4 (test 2 entry)   : SAVE depth-2, stop tracking during test
+//   State 4 test-end           : start tracking
+//   State 4 new test           : SAVE depth-N, stop tracking during test
 addZone(top, bot, pivotBar, ztp) =>
-    barsBack = bar_index - pivotBar   // ≥ i_n since pivot = bar_index - i_n
+    barsBack = bar_index - pivotBar
+    st      = 0
+    tst     = 0
+    inT     = false
+    tracker = 0.0
+    dlog    = ""
 
-    st  = 0
-    tst = 0
-    inT = false
-
-    // ── Retroactive state replay ──────────────────────────────────────────────
-    // Exit condition for resistance : h < bot  (entire candle cleared below zone)
-    // Exit condition for support    : l > top  (entire candle cleared above zone)
-    // This prevents oscillations around the zone boundary from inflating test counts.
-    for k = barsBack - 1 to 0        // k=barsBack-1 is pivot+1, k=0 is current bar
+    for k = barsBack - 1 to 0
         h = high[k]
         l = low[k]
 
-        if ztp == 1  // resistance
+        if ztp == 1  // ── Resistance ──────────────────────────────────────────
             if st == 0
                 if l > top
                     st := -1
                     break
-                if h < bot          // fully cleared below zone → initial exit
-                    st := 1
+                if h < bot                   // initial exit → start tracking
+                    st      := 1
+                    tracker := l
+
             else if st == 1
-                if h >= bot
-                    tst += 1
-                    st  := 2
-                    inT := true
-            else if st == 2
+                tracker := math.min(tracker, l)
+                if h >= bot                  // test 1 entry → save depth-1
+                    dlog    := appendDepth(dlog, bot - tracker)
+                    tst     += 1
+                    st      := 2
+                    inT     := true
+
+            else if st == 2                  // inside test 1, no tracking
                 if l > top
                     st := -1
                     break
-                if h < bot          // fully cleared below zone → test passed
-                    st  := 3
-                    inT := false
+                if h < bot                   // test 1 ends → start tracking
+                    st      := 3
+                    inT     := false
+                    tracker := l
+
             else if st == 3
-                if h >= bot
-                    tst += 1
-                    st  := 4
-                    inT := true
+                tracker := math.min(tracker, l)
+                if h >= bot                  // test 2 entry → save depth-2
+                    dlog    := appendDepth(dlog, bot - tracker)
+                    tst     += 1
+                    st      := 4
+                    inT     := true
+
             else  // st == 4
                 if l > top
                     st := -1
                     break
-                if inT and h < bot  // fully cleared below zone → test over
-                    inT := false
-                if not inT and h >= bot
-                    tst += 1
-                    inT := true
+                if inT and h < bot           // test ends → start tracking pullback
+                    inT     := false
+                    tracker := l
+                if not inT                   // between tests: track
+                    tracker := math.min(tracker, l)
+                    if h >= bot              // new test entry → save depth
+                        dlog    := appendDepth(dlog, bot - tracker)
+                        tst     += 1
+                        inT     := true
 
-        else  // support
+        else  // ── Support ─────────────────────────────────────────────────────
             if st == 0
                 if h < bot
                     st := -1
                     break
-                if l > top          // fully cleared above zone → initial exit
-                    st := 1
+                if l > top                   // initial exit → start tracking
+                    st      := 1
+                    tracker := h
+
             else if st == 1
-                if l <= top
-                    tst += 1
-                    st  := 2
-                    inT := true
+                tracker := math.max(tracker, h)
+                if l <= top                  // test 1 entry → save depth-1
+                    dlog    := appendDepth(dlog, tracker - top)
+                    tst     += 1
+                    st      := 2
+                    inT     := true
+
             else if st == 2
                 if h < bot
                     st := -1
                     break
-                if l > top          // fully cleared above zone → test passed
-                    st  := 3
-                    inT := false
+                if l > top                   // test 1 ends → start tracking
+                    st      := 3
+                    inT     := false
+                    tracker := h
+
             else if st == 3
-                if l <= top
-                    tst += 1
-                    st  := 4
-                    inT := true
+                tracker := math.max(tracker, h)
+                if l <= top                  // test 2 entry → save depth-2
+                    dlog    := appendDepth(dlog, tracker - top)
+                    tst     += 1
+                    st      := 4
+                    inT     := true
+
             else  // st == 4
                 if h < bot
                     st := -1
                     break
-                if inT and l > top  // fully cleared above zone → test over
-                    inT := false
-                if not inT and l <= top
-                    tst += 1
-                    inT := true
+                if inT and l > top           // test ends → start tracking
+                    inT     := false
+                    tracker := h
+                if not inT
+                    tracker := math.max(tracker, h)
+                    if l <= top              // new test entry → save depth
+                        dlog    := appendDepth(dlog, tracker - top)
+                        tst     += 1
+                        inT     := true
 
-    // ── If zone survived, register it ────────────────────────────────────────
     if st >= 0
         newBox = makeInvisBox()
         newLbl = makeInvisLabel()
-
         if st == 4
-            activateBox(newBox, newLbl, pivotBar, top, bot, ztp, tst)
-
-        array.push(zA_top,    top)
-        array.push(zA_bot,    bot)
-        array.push(zA_origin, pivotBar)
-        array.push(zA_type,   ztp)
-        array.push(zA_state,  st)
-        array.push(zA_tests,  tst)
-        array.push(zA_inTest, inT)
-        array.push(zA_box,    newBox)
-        array.push(zA_lbl,    newLbl)
-
-        // Trim to MAX_ZONES (drop oldest)
+            activateBox(newBox, newLbl, pivotBar, top, bot, ztp, tst, dlog, tracker, inT)
+        array.push(zA_top,      top)
+        array.push(zA_bot,      bot)
+        array.push(zA_origin,   pivotBar)
+        array.push(zA_type,     ztp)
+        array.push(zA_state,    st)
+        array.push(zA_tests,    tst)
+        array.push(zA_inTest,   inT)
+        array.push(zA_curTrack, tracker)
+        array.push(zA_depthLog, dlog)
+        array.push(zA_box,      newBox)
+        array.push(zA_lbl,      newLbl)
         while array.size(zA_top) > MAX_ZONES
             array.shift(zA_top)
             array.shift(zA_bot)
@@ -188,11 +243,13 @@ addZone(top, bot, pivotBar, ztp) =>
             array.shift(zA_state)
             array.shift(zA_tests)
             array.shift(zA_inTest)
+            array.shift(zA_curTrack)
+            array.shift(zA_depthLog)
             box.delete(array.shift(zA_box))
             label.delete(array.shift(zA_lbl))
 
 // ─── Register new pivots ──────────────────────────────────────────────────────
-showResist = i_show != "Support Only"
+showResist  = i_show != "Support Only"
 showSupport = i_show != "Resistance Only"
 
 if isMarkHigh and showResist
@@ -210,15 +267,15 @@ if isMarkLow and showSupport
 // ─── Per-bar update loop ──────────────────────────────────────────────────────
 idx = 0
 while idx < array.size(zA_top)
-    top    = array.get(zA_top,    idx)
-    bot    = array.get(zA_bot,    idx)
-    ztp    = array.get(zA_type,   idx)
-    st     = array.get(zA_state,  idx)
-    tst    = array.get(zA_tests,  idx)
-    inT    = array.get(zA_inTest, idx)
-    origin = array.get(zA_origin, idx)
-    bx     = array.get(zA_box,    idx)
-    lb     = array.get(zA_lbl,    idx)
+    top    = array.get(zA_top,     idx)
+    bot    = array.get(zA_bot,     idx)
+    ztp    = array.get(zA_type,    idx)
+    st     = array.get(zA_state,   idx)
+    tst    = array.get(zA_tests,   idx)
+    inT    = array.get(zA_inTest,  idx)
+    origin = array.get(zA_origin,  idx)
+    bx     = array.get(zA_box,     idx)
+    lb     = array.get(zA_lbl,     idx)
 
     h = high
     l = low
@@ -226,9 +283,6 @@ while idx < array.size(zA_top)
 
     failed = false
 
-    // ── Age-out pre-visible zones beyond lookback ─────────────────────────────
-    // State-4 zones (rectangle drawn) persist until truly broken.
-    // Zones still building state (0–3) are cleaned up once older than lookback.
     if bar_index - origin > i_lookback
         failed := true
 
@@ -237,102 +291,146 @@ while idx < array.size(zA_top)
             if st == 0
                 if l > top
                     failed := true
-                else if h < bot     // fully cleared below zone → initial exit
-                    array.set(zA_state, idx, 1)
+                else if h < bot              // initial exit → start tracking
+                    array.set(zA_state,    idx, 1)
+                    array.set(zA_curTrack, idx, l)
 
             else if st == 1
-                if h >= bot
+                array.set(zA_curTrack, idx, math.min(array.get(zA_curTrack, idx), l))
+                if h >= bot                  // test 1 entry → save depth-1
+                    dlog = appendDepth(array.get(zA_depthLog, idx),
+                                       bot - array.get(zA_curTrack, idx))
+                    array.set(zA_depthLog, idx, dlog)
                     tst += 1
-                    array.set(zA_tests,  idx, tst)
-                    array.set(zA_state,  idx, 2)
-                    array.set(zA_inTest, idx, true)
+                    array.set(zA_tests,   idx, tst)
+                    array.set(zA_state,   idx, 2)
+                    array.set(zA_inTest,  idx, true)
 
-            else if st == 2
+            else if st == 2                  // inside test 1, no tracking
                 if l > top
                     failed := true
-                else if h < bot     // fully cleared below zone → test passed
-                    array.set(zA_state,  idx, 3)
-                    array.set(zA_inTest, idx, false)
+                else if h < bot              // test 1 ends → start tracking
+                    array.set(zA_state,    idx, 3)
+                    array.set(zA_inTest,   idx, false)
+                    array.set(zA_curTrack, idx, l)
 
             else if st == 3
-                if h >= bot
+                array.set(zA_curTrack, idx, math.min(array.get(zA_curTrack, idx), l))
+                if h >= bot                  // test 2 entry → save depth-2, activate box
+                    dlog = appendDepth(array.get(zA_depthLog, idx),
+                                       bot - array.get(zA_curTrack, idx))
+                    array.set(zA_depthLog, idx, dlog)
                     tst += 1
-                    array.set(zA_tests,  idx, tst)
-                    array.set(zA_state,  idx, 4)
-                    array.set(zA_inTest, idx, true)
-                    activateBox(bx, lb, origin, top, bot, 1, tst)
+                    array.set(zA_tests,   idx, tst)
+                    array.set(zA_state,   idx, 4)
+                    array.set(zA_inTest,  idx, true)
+                    activateBox(bx, lb, origin, top, bot, 1, tst, dlog,
+                         array.get(zA_curTrack, idx), true)
 
             else  // st == 4
                 if l > top
                     failed := true
                 else
-                    if inT and h < bot  // fully cleared below zone → test over
-                        array.set(zA_inTest, idx, false)
-                    if not array.get(zA_inTest, idx) and h >= bot
-                        tst += 1
-                        array.set(zA_tests,  idx, tst)
-                        array.set(zA_inTest, idx, true)
-                    curTests = array.get(zA_tests, idx)
+                    if inT and h < bot       // test ends → start tracking pullback
+                        array.set(zA_inTest,   idx, false)
+                        array.set(zA_curTrack, idx, l)
+                    curInT = array.get(zA_inTest, idx)
+                    if not curInT            // between tests: track
+                        array.set(zA_curTrack, idx, math.min(array.get(zA_curTrack, idx), l))
+                        if h >= bot          // new test → save depth, update label
+                            dlog = appendDepth(array.get(zA_depthLog, idx),
+                                               bot - array.get(zA_curTrack, idx))
+                            array.set(zA_depthLog, idx, dlog)
+                            tst += 1
+                            array.set(zA_tests,   idx, tst)
+                            array.set(zA_inTest,  idx, true)
+                    curTests  = array.get(zA_tests,   idx)
+                    curInTest = array.get(zA_inTest,  idx)
+                    dd = buildDepthStr(array.get(zA_depthLog, idx),
+                                       array.get(zA_curTrack, idx), bot, top, 1, curInTest)
                     box.set_right(bx,  bar_index)
                     label.set_xy(lb,   bar_index + 1, (top + bot) / 2.0)
-                    label.set_text(lb, "Resistance Region - " + str.tostring(curTests) + " tests")
+                    label.set_text(lb, "Resistance Region - " + str.tostring(curTests) + " tests | Depth: " + dd)
 
         else  // ── Support ───────────────────────────────────────────────────
             if st == 0
                 if h < bot
                     failed := true
-                else if l > top     // fully cleared above zone → initial exit
-                    array.set(zA_state, idx, 1)
+                else if l > top              // initial exit → start tracking
+                    array.set(zA_state,    idx, 1)
+                    array.set(zA_curTrack, idx, h)
 
             else if st == 1
-                if l <= top
+                array.set(zA_curTrack, idx, math.max(array.get(zA_curTrack, idx), h))
+                if l <= top                  // test 1 entry → save depth-1
+                    dlog = appendDepth(array.get(zA_depthLog, idx),
+                                       array.get(zA_curTrack, idx) - top)
+                    array.set(zA_depthLog, idx, dlog)
                     tst += 1
-                    array.set(zA_tests,  idx, tst)
-                    array.set(zA_state,  idx, 2)
-                    array.set(zA_inTest, idx, true)
+                    array.set(zA_tests,   idx, tst)
+                    array.set(zA_state,   idx, 2)
+                    array.set(zA_inTest,  idx, true)
 
             else if st == 2
                 if h < bot
                     failed := true
-                else if l > top     // fully cleared above zone → test passed
-                    array.set(zA_state,  idx, 3)
-                    array.set(zA_inTest, idx, false)
+                else if l > top              // test 1 ends → start tracking
+                    array.set(zA_state,    idx, 3)
+                    array.set(zA_inTest,   idx, false)
+                    array.set(zA_curTrack, idx, h)
 
             else if st == 3
-                if l <= top
+                array.set(zA_curTrack, idx, math.max(array.get(zA_curTrack, idx), h))
+                if l <= top                  // test 2 entry → save depth-2, activate box
+                    dlog = appendDepth(array.get(zA_depthLog, idx),
+                                       array.get(zA_curTrack, idx) - top)
+                    array.set(zA_depthLog, idx, dlog)
                     tst += 1
-                    array.set(zA_tests,  idx, tst)
-                    array.set(zA_state,  idx, 4)
-                    array.set(zA_inTest, idx, true)
-                    activateBox(bx, lb, origin, top, bot, -1, tst)
+                    array.set(zA_tests,   idx, tst)
+                    array.set(zA_state,   idx, 4)
+                    array.set(zA_inTest,  idx, true)
+                    activateBox(bx, lb, origin, top, bot, -1, tst, dlog,
+                         array.get(zA_curTrack, idx), true)
 
             else  // st == 4
                 if h < bot
                     failed := true
                 else
-                    if inT and l > top  // fully cleared above zone → test over
-                        array.set(zA_inTest, idx, false)
-                    if not array.get(zA_inTest, idx) and l <= top
-                        tst += 1
-                        array.set(zA_tests,  idx, tst)
-                        array.set(zA_inTest, idx, true)
-                    curTests = array.get(zA_tests, idx)
+                    if inT and l > top       // test ends → start tracking
+                        array.set(zA_inTest,   idx, false)
+                        array.set(zA_curTrack, idx, h)
+                    curInT = array.get(zA_inTest, idx)
+                    if not curInT
+                        array.set(zA_curTrack, idx, math.max(array.get(zA_curTrack, idx), h))
+                        if l <= top
+                            dlog = appendDepth(array.get(zA_depthLog, idx),
+                                               array.get(zA_curTrack, idx) - top)
+                            array.set(zA_depthLog, idx, dlog)
+                            tst += 1
+                            array.set(zA_tests,   idx, tst)
+                            array.set(zA_inTest,  idx, true)
+                    curTests  = array.get(zA_tests,   idx)
+                    curInTest = array.get(zA_inTest,  idx)
+                    dd = buildDepthStr(array.get(zA_depthLog, idx),
+                                       array.get(zA_curTrack, idx), bot, top, -1, curInTest)
                     box.set_right(bx,  bar_index)
                     label.set_xy(lb,   bar_index + 1, (top + bot) / 2.0)
-                    label.set_text(lb, "Support Region - " + str.tostring(curTests) + " tests")
+                    label.set_text(lb, "Support Region - " + str.tostring(curTests) + " tests | Depth: " + dd)
 
     if failed
         box.delete(bx)
         label.delete(lb)
-        array.remove(zA_top,    idx)
-        array.remove(zA_bot,    idx)
-        array.remove(zA_origin, idx)
-        array.remove(zA_type,   idx)
-        array.remove(zA_state,  idx)
-        array.remove(zA_tests,  idx)
-        array.remove(zA_inTest, idx)
-        array.remove(zA_box,    idx)
-        array.remove(zA_lbl,    idx)
+        array.remove(zA_top,      idx)
+        array.remove(zA_bot,      idx)
+        array.remove(zA_origin,   idx)
+        array.remove(zA_type,     idx)
+        array.remove(zA_state,    idx)
+        array.remove(zA_tests,    idx)
+        array.remove(zA_inTest,   idx)
+        array.remove(zA_curTrack, idx)
+        array.remove(zA_depthLog, idx)
+        array.remove(zA_box,      idx)
+        array.remove(zA_lbl,      idx)
         // do NOT increment idx — the next zone has shifted into this slot
     else
         idx += 1

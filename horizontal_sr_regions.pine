@@ -34,7 +34,8 @@ isMarkLow  = _swLow  or _eqLow
 //
 // maxPrev  : max of all completed depths BEFORE the most recent one
 // lastDep  : most recent completed depth
-// Weakening condition: lastDep < maxPrev  (latest pullback shallower than any prior)
+// isWeak   : lastDep < maxPrev  (latest pullback shallower than any prior)
+// allDecr  : every depth is strictly less than the one before it (needs 2+ depths)
 var array<float>  zA_top      = array.new_float()
 var array<float>  zA_bot      = array.new_float()
 var array<int>    zA_origin   = array.new_int()
@@ -44,12 +45,13 @@ var array<int>    zA_tests    = array.new_int()
 var array<bool>   zA_inTest   = array.new_bool()
 var array<float>  zA_curTrack = array.new_float()
 var array<string> zA_depthLog = array.new_string()
-var array<float>  zA_lastDep  = array.new_float()   // most recent completed depth
-var array<float>  zA_maxPrev  = array.new_float()   // max of all depths before lastDep
-var array<bool>   zA_isWeak   = array.new_bool()    // weakening flag for last completed depth
+var array<float>  zA_lastDep  = array.new_float()
+var array<float>  zA_maxPrev  = array.new_float()
+var array<bool>   zA_isWeak   = array.new_bool()
+var array<bool>   zA_allDecr  = array.new_bool()
 var array<box>    zA_box      = array.new<box>()
 var array<label>  zA_lbl      = array.new<label>()
-var array<label>  zA_wkLbl    = array.new<label>()  // "Depth Weakening" label
+var array<label>  zA_wkLbl    = array.new<label>()
 
 MAX_ZONES = 50
 
@@ -80,6 +82,37 @@ trackDepth(prevMaxPrev, prevLastDep, newDep) =>
     isWeak     = newDep > 0.0 and newMaxPrev > 0.0 and newDep < newMaxPrev
     [newMaxPrev, newDep, isWeak]
 
+// Compute the new allDecr flag when a new depth arrives.
+// depCount = number of completed depths BEFORE this new one.
+// Rule: allDecr is true only when every consecutive pair is strictly decreasing.
+//   depCount==0 → first depth, no comparison yet → false
+//   depCount==1 → second depth, first real comparison, ignore prev flag
+//   depCount>=2 → AND previous flag with new comparison
+calcAllDecr(prevAllDecr, prevLastDep, newDep, depCount) =>
+    depCount == 0 ? false :
+     depCount == 1 ? newDep < prevLastDep :
+     prevAllDecr and newDep < prevLastDep
+
+// Show "Depths decreasing" when all depths are strictly descending,
+// "latest test depth has been weaker" when only the last one is weaker,
+// or hide otherwise.
+// Badge is also suppressed when live pullback depth already exceeds maxPrev
+// (avoids false warning when the current pullback is already deeper than all prior).
+updateWkLbl(wkLb, isWeak, allDecr, yPos) =>
+    txt = allDecr ? "Depths decreasing - zone weakening" :
+          isWeak  ? "latest test depth has been weaker"  : ""
+    if txt != ""
+        label.set_xy(wkLb,        bar_index + 1, yPos)
+        label.set_text(wkLb,      txt)
+        label.set_color(wkLb,     color.yellow)
+        label.set_textcolor(wkLb, color.red)
+        label.set_style(wkLb,     label.style_label_right)
+        label.set_size(wkLb,      size.small)
+    else
+        label.set_text(wkLb,      "")
+        label.set_color(wkLb,     INVIS)
+        label.set_textcolor(wkLb, INVIS)
+
 // ─── activateBox ─────────────────────────────────────────────────────────────
 activateBox(bx, lb, origin, top, bot, ztp, tst, dlog, tracker, inT) =>
     zc = ztp == 1 ? i_rColor : i_sColor
@@ -100,20 +133,6 @@ activateBox(bx, lb, origin, top, bot, ztp, tst, dlog, tracker, inT) =>
     label.set_style(lb,      label.style_label_right)
     label.set_size(lb,       size.small)
 
-// Update weakening label visibility.
-updateWkLbl(wkLb, isWeak, bot, ztp) =>
-    if isWeak
-        label.set_xy(wkLb,       bar_index + 1, bot)
-        label.set_text(wkLb,     "latest test depth has been weaker")
-        label.set_color(wkLb,    color.yellow)
-        label.set_textcolor(wkLb, color.red)
-        label.set_style(wkLb,    label.style_label_right)
-        label.set_size(wkLb,     size.small)
-    else
-        label.set_text(wkLb,     "")
-        label.set_color(wkLb,    INVIS)
-        label.set_textcolor(wkLb, INVIS)
-
 // ─── addZone ─────────────────────────────────────────────────────────────────
 addZone(top, bot, pivotBar, ztp) =>
     barsBack = bar_index - pivotBar
@@ -125,6 +144,7 @@ addZone(top, bot, pivotBar, ztp) =>
     lastDep  = 0.0
     maxPrev  = 0.0
     isWeak   = false
+    allDecr  = false
 
     for k = barsBack - 1 to 0
         h = high[k]
@@ -142,7 +162,8 @@ addZone(top, bot, pivotBar, ztp) =>
             else if st == 1
                 tracker := math.min(tracker, l)
                 if h >= bot
-                    d = bot - tracker
+                    d        = bot - tracker
+                    allDecr := calcAllDecr(allDecr, lastDep, d, tst)
                     [mp, ld, iw] = trackDepth(maxPrev, lastDep, d)
                     maxPrev := mp
                     lastDep := ld
@@ -164,7 +185,8 @@ addZone(top, bot, pivotBar, ztp) =>
             else if st == 3
                 tracker := math.min(tracker, l)
                 if h >= bot
-                    d = bot - tracker
+                    d        = bot - tracker
+                    allDecr := calcAllDecr(allDecr, lastDep, d, tst)
                     [mp, ld, iw] = trackDepth(maxPrev, lastDep, d)
                     maxPrev := mp
                     lastDep := ld
@@ -184,7 +206,8 @@ addZone(top, bot, pivotBar, ztp) =>
                 if not inT
                     tracker := math.min(tracker, l)
                     if h >= bot
-                        d = bot - tracker
+                        d        = bot - tracker
+                        allDecr := calcAllDecr(allDecr, lastDep, d, tst)
                         [mp, ld, iw] = trackDepth(maxPrev, lastDep, d)
                         maxPrev := mp
                         lastDep := ld
@@ -205,7 +228,8 @@ addZone(top, bot, pivotBar, ztp) =>
             else if st == 1
                 tracker := math.max(tracker, h)
                 if l <= top
-                    d = tracker - top
+                    d        = tracker - top
+                    allDecr := calcAllDecr(allDecr, lastDep, d, tst)
                     [mp, ld, iw] = trackDepth(maxPrev, lastDep, d)
                     maxPrev := mp
                     lastDep := ld
@@ -227,7 +251,8 @@ addZone(top, bot, pivotBar, ztp) =>
             else if st == 3
                 tracker := math.max(tracker, h)
                 if l <= top
-                    d = tracker - top
+                    d        = tracker - top
+                    allDecr := calcAllDecr(allDecr, lastDep, d, tst)
                     [mp, ld, iw] = trackDepth(maxPrev, lastDep, d)
                     maxPrev := mp
                     lastDep := ld
@@ -247,7 +272,8 @@ addZone(top, bot, pivotBar, ztp) =>
                 if not inT
                     tracker := math.max(tracker, h)
                     if l <= top
-                        d = tracker - top
+                        d        = tracker - top
+                        allDecr := calcAllDecr(allDecr, lastDep, d, tst)
                         [mp, ld, iw] = trackDepth(maxPrev, lastDep, d)
                         maxPrev := mp
                         lastDep := ld
@@ -260,9 +286,10 @@ addZone(top, bot, pivotBar, ztp) =>
         newBox  = makeInvisBox()
         newLbl  = makeInvisLabel()
         newWkLb = makeInvisLabel()
+        yPos    = ztp == 1 ? bot : top
         if st == 4
             activateBox(newBox, newLbl, pivotBar, top, bot, ztp, tst, dlog, tracker, inT)
-            updateWkLbl(newWkLb, isWeak, bot, ztp)
+            updateWkLbl(newWkLb, isWeak, allDecr, yPos)
         array.push(zA_top,      top)
         array.push(zA_bot,      bot)
         array.push(zA_origin,   pivotBar)
@@ -275,6 +302,7 @@ addZone(top, bot, pivotBar, ztp) =>
         array.push(zA_lastDep,  lastDep)
         array.push(zA_maxPrev,  maxPrev)
         array.push(zA_isWeak,   isWeak)
+        array.push(zA_allDecr,  allDecr)
         array.push(zA_box,      newBox)
         array.push(zA_lbl,      newLbl)
         array.push(zA_wkLbl,    newWkLb)
@@ -291,6 +319,7 @@ addZone(top, bot, pivotBar, ztp) =>
             array.shift(zA_lastDep)
             array.shift(zA_maxPrev)
             array.shift(zA_isWeak)
+            array.shift(zA_allDecr)
             box.delete(array.shift(zA_box))
             label.delete(array.shift(zA_lbl))
             label.delete(array.shift(zA_wkLbl))
@@ -348,10 +377,13 @@ while idx < array.size(zA_top)
             else if st == 1
                 array.set(zA_curTrack, idx, math.min(array.get(zA_curTrack, idx), l))
                 if h >= bot
-                    d = bot - array.get(zA_curTrack, idx)
+                    d  = bot - array.get(zA_curTrack, idx)
+                    ad = calcAllDecr(array.get(zA_allDecr, idx), lastDep, d, tst)
                     [mp, ld, iw] = trackDepth(maxPrev, lastDep, d)
                     array.set(zA_maxPrev,  idx, mp)
                     array.set(zA_lastDep,  idx, ld)
+                    array.set(zA_isWeak,   idx, iw)
+                    array.set(zA_allDecr,  idx, ad)
                     array.set(zA_depthLog, idx, appendDepth(array.get(zA_depthLog, idx), d))
                     tst += 1
                     array.set(zA_tests,   idx, tst)
@@ -369,10 +401,13 @@ while idx < array.size(zA_top)
             else if st == 3
                 array.set(zA_curTrack, idx, math.min(array.get(zA_curTrack, idx), l))
                 if h >= bot
-                    d = bot - array.get(zA_curTrack, idx)
+                    d  = bot - array.get(zA_curTrack, idx)
+                    ad = calcAllDecr(array.get(zA_allDecr, idx), lastDep, d, tst)
                     [mp, ld, iw] = trackDepth(maxPrev, lastDep, d)
                     array.set(zA_maxPrev,  idx, mp)
                     array.set(zA_lastDep,  idx, ld)
+                    array.set(zA_isWeak,   idx, iw)
+                    array.set(zA_allDecr,  idx, ad)
                     dlog = appendDepth(array.get(zA_depthLog, idx), d)
                     array.set(zA_depthLog, idx, dlog)
                     tst += 1
@@ -381,8 +416,7 @@ while idx < array.size(zA_top)
                     array.set(zA_inTest,  idx, true)
                     activateBox(bx, lb, origin, top, bot, 1, tst, dlog,
                          array.get(zA_curTrack, idx), true)
-                    array.set(zA_isWeak, idx, iw)
-                    updateWkLbl(wkLb, iw, bot, 1)
+                    updateWkLbl(wkLb, iw, ad, bot)
 
             else  // st == 4
                 if l > top
@@ -395,17 +429,19 @@ while idx < array.size(zA_top)
                     if not curInT
                         array.set(zA_curTrack, idx, math.min(array.get(zA_curTrack, idx), l))
                         if h >= bot
-                            d = bot - array.get(zA_curTrack, idx)
+                            d  = bot - array.get(zA_curTrack, idx)
+                            ad = calcAllDecr(array.get(zA_allDecr, idx),
+                                             array.get(zA_lastDep,  idx), d, tst)
                             [mp, ld, iw] = trackDepth(array.get(zA_maxPrev, idx),
                                                        array.get(zA_lastDep, idx), d)
                             array.set(zA_maxPrev,  idx, mp)
                             array.set(zA_lastDep,  idx, ld)
+                            array.set(zA_isWeak,   idx, iw)
+                            array.set(zA_allDecr,  idx, ad)
                             array.set(zA_depthLog, idx, appendDepth(array.get(zA_depthLog, idx), d))
                             tst += 1
                             array.set(zA_tests,   idx, tst)
                             array.set(zA_inTest,  idx, true)
-                            array.set(zA_isWeak,  idx, iw)
-                            updateWkLbl(wkLb, iw, bot, 1)
                     curTests  = array.get(zA_tests,   idx)
                     curInTest = array.get(zA_inTest,  idx)
                     dd = buildDepthStr(array.get(zA_depthLog, idx),
@@ -413,13 +449,15 @@ while idx < array.size(zA_top)
                     box.set_right(bx,  bar_index)
                     label.set_xy(lb,   bar_index + 1, (top + bot) / 2.0)
                     label.set_text(lb, "Resistance Region - " + str.tostring(curTests) + " tests | Depth: " + dd)
-                    wkShow = array.get(zA_isWeak, idx)
-                    if wkShow and not curInTest
+                    wkShow   = array.get(zA_isWeak,  idx)
+                    wkAllDec = array.get(zA_allDecr, idx)
+                    if (wkShow or wkAllDec) and not curInTest
                         curMxPrev = array.get(zA_maxPrev, idx)
                         liveD     = bot - array.get(zA_curTrack, idx)
                         if curMxPrev > 0.0 and liveD >= curMxPrev
-                            wkShow := false
-                    updateWkLbl(wkLb, wkShow, bot, 1)
+                            wkShow   := false
+                            wkAllDec := false
+                    updateWkLbl(wkLb, wkShow, wkAllDec, bot)
 
         else  // ── Support ───────────────────────────────────────────────────
             if st == 0
@@ -432,10 +470,13 @@ while idx < array.size(zA_top)
             else if st == 1
                 array.set(zA_curTrack, idx, math.max(array.get(zA_curTrack, idx), h))
                 if l <= top
-                    d = array.get(zA_curTrack, idx) - top
+                    d  = array.get(zA_curTrack, idx) - top
+                    ad = calcAllDecr(array.get(zA_allDecr, idx), lastDep, d, tst)
                     [mp, ld, iw] = trackDepth(maxPrev, lastDep, d)
                     array.set(zA_maxPrev,  idx, mp)
                     array.set(zA_lastDep,  idx, ld)
+                    array.set(zA_isWeak,   idx, iw)
+                    array.set(zA_allDecr,  idx, ad)
                     array.set(zA_depthLog, idx, appendDepth(array.get(zA_depthLog, idx), d))
                     tst += 1
                     array.set(zA_tests,   idx, tst)
@@ -453,10 +494,13 @@ while idx < array.size(zA_top)
             else if st == 3
                 array.set(zA_curTrack, idx, math.max(array.get(zA_curTrack, idx), h))
                 if l <= top
-                    d = array.get(zA_curTrack, idx) - top
+                    d  = array.get(zA_curTrack, idx) - top
+                    ad = calcAllDecr(array.get(zA_allDecr, idx), lastDep, d, tst)
                     [mp, ld, iw] = trackDepth(maxPrev, lastDep, d)
                     array.set(zA_maxPrev,  idx, mp)
                     array.set(zA_lastDep,  idx, ld)
+                    array.set(zA_isWeak,   idx, iw)
+                    array.set(zA_allDecr,  idx, ad)
                     dlog = appendDepth(array.get(zA_depthLog, idx), d)
                     array.set(zA_depthLog, idx, dlog)
                     tst += 1
@@ -465,8 +509,7 @@ while idx < array.size(zA_top)
                     array.set(zA_inTest,  idx, true)
                     activateBox(bx, lb, origin, top, bot, -1, tst, dlog,
                          array.get(zA_curTrack, idx), true)
-                    array.set(zA_isWeak, idx, iw)
-                    updateWkLbl(wkLb, iw, top, -1)
+                    updateWkLbl(wkLb, iw, ad, top)
 
             else  // st == 4
                 if h < bot
@@ -479,17 +522,19 @@ while idx < array.size(zA_top)
                     if not curInT
                         array.set(zA_curTrack, idx, math.max(array.get(zA_curTrack, idx), h))
                         if l <= top
-                            d = array.get(zA_curTrack, idx) - top
+                            d  = array.get(zA_curTrack, idx) - top
+                            ad = calcAllDecr(array.get(zA_allDecr, idx),
+                                             array.get(zA_lastDep,  idx), d, tst)
                             [mp, ld, iw] = trackDepth(array.get(zA_maxPrev, idx),
                                                        array.get(zA_lastDep, idx), d)
                             array.set(zA_maxPrev,  idx, mp)
                             array.set(zA_lastDep,  idx, ld)
+                            array.set(zA_isWeak,   idx, iw)
+                            array.set(zA_allDecr,  idx, ad)
                             array.set(zA_depthLog, idx, appendDepth(array.get(zA_depthLog, idx), d))
                             tst += 1
                             array.set(zA_tests,   idx, tst)
                             array.set(zA_inTest,  idx, true)
-                            array.set(zA_isWeak,  idx, iw)
-                            updateWkLbl(wkLb, iw, top, -1)
                     curTests  = array.get(zA_tests,   idx)
                     curInTest = array.get(zA_inTest,  idx)
                     dd = buildDepthStr(array.get(zA_depthLog, idx),
@@ -497,13 +542,15 @@ while idx < array.size(zA_top)
                     box.set_right(bx,  bar_index)
                     label.set_xy(lb,   bar_index + 1, (top + bot) / 2.0)
                     label.set_text(lb, "Support Region - " + str.tostring(curTests) + " tests | Depth: " + dd)
-                    wkShow = array.get(zA_isWeak, idx)
-                    if wkShow and not curInTest
+                    wkShow   = array.get(zA_isWeak,  idx)
+                    wkAllDec = array.get(zA_allDecr, idx)
+                    if (wkShow or wkAllDec) and not curInTest
                         curMxPrev = array.get(zA_maxPrev, idx)
                         liveD     = array.get(zA_curTrack, idx) - top
                         if curMxPrev > 0.0 and liveD >= curMxPrev
-                            wkShow := false
-                    updateWkLbl(wkLb, wkShow, top, -1)
+                            wkShow   := false
+                            wkAllDec := false
+                    updateWkLbl(wkLb, wkShow, wkAllDec, top)
 
     if failed
         box.delete(bx)
@@ -521,6 +568,7 @@ while idx < array.size(zA_top)
         array.remove(zA_lastDep,  idx)
         array.remove(zA_maxPrev,  idx)
         array.remove(zA_isWeak,   idx)
+        array.remove(zA_allDecr,  idx)
         array.remove(zA_box,      idx)
         array.remove(zA_lbl,      idx)
         array.remove(zA_wkLbl,    idx)

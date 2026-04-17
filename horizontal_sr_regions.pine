@@ -51,10 +51,10 @@ MAX_ZONES = 50
 INVIS = color.new(color.white, 100)
 
 makeInvisBox() =>
-    box.new(bar_index, 0.0, bar_index + 1, 0.0, border_color=INVIS, bgcolor=INVIS)
+    box.new(bar_index, close, bar_index + 1, close, border_color=INVIS, bgcolor=INVIS)
 
 makeInvisLabel() =>
-    label.new(bar_index, 0.0, "", color=INVIS, textcolor=INVIS)
+    label.new(bar_index, close, "", color=INVIS, textcolor=INVIS)
 
 // ─── activateBox: make a hidden box & label visible for state-4 zones ─────────
 activateBox(bx, lb, origin, top, bot, ztp, tst) =>
@@ -229,7 +229,7 @@ while idx < array.size(zA_top)
     // ── Age-out pre-visible zones beyond lookback ─────────────────────────────
     // State-4 zones (rectangle drawn) persist until truly broken.
     // Zones still building state (0–3) are cleaned up once older than lookback.
-    if bar_index - origin > i_lookback and st < 4
+    if bar_index - origin > i_lookback
         failed := true
 
     if not failed

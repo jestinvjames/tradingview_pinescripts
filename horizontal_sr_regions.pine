@@ -5,7 +5,7 @@ indicator("Horizontal Support & Resistance Regions", overlay=true, max_boxes_cou
 i_n        = input.int(2,   "Lookback / Lookahead Bars", minval=1, maxval=20,
                group="Swing Detection",
                tooltip="Bars on each side of the pivot for swing detection. Same as Swing High/Low Dots.")
-i_lookback = input.int(300, "Zone Lookback (bars)",      minval=10,
+i_lookback = input.int(100, "Zone Lookback (bars)",      minval=10,
                group="Swing Detection",
                tooltip="Zones whose pivot is older than this many bars are automatically removed.")
 
@@ -46,6 +46,7 @@ var array<float>  zA_curTrack = array.new_float()
 var array<string> zA_depthLog = array.new_string()
 var array<float>  zA_lastDep  = array.new_float()   // most recent completed depth
 var array<float>  zA_maxPrev  = array.new_float()   // max of all depths before lastDep
+var array<bool>   zA_isWeak   = array.new_bool()    // weakening flag for last completed depth
 var array<box>    zA_box      = array.new<box>()
 var array<label>  zA_lbl      = array.new<label>()
 var array<label>  zA_wkLbl    = array.new<label>()  // "Depth Weakening" label
@@ -103,7 +104,7 @@ activateBox(bx, lb, origin, top, bot, ztp, tst, dlog, tracker, inT) =>
 updateWkLbl(wkLb, isWeak, bot, ztp) =>
     if isWeak
         label.set_xy(wkLb,       bar_index + 1, bot)
-        label.set_text(wkLb,     "Depth Weakening")
+        label.set_text(wkLb,     "latest test depth has been weaker")
         label.set_color(wkLb,    color.yellow)
         label.set_textcolor(wkLb, color.red)
         label.set_style(wkLb,    label.style_label_right)
@@ -273,6 +274,7 @@ addZone(top, bot, pivotBar, ztp) =>
         array.push(zA_depthLog, dlog)
         array.push(zA_lastDep,  lastDep)
         array.push(zA_maxPrev,  maxPrev)
+        array.push(zA_isWeak,   isWeak)
         array.push(zA_box,      newBox)
         array.push(zA_lbl,      newLbl)
         array.push(zA_wkLbl,    newWkLb)
@@ -288,6 +290,7 @@ addZone(top, bot, pivotBar, ztp) =>
             array.shift(zA_depthLog)
             array.shift(zA_lastDep)
             array.shift(zA_maxPrev)
+            array.shift(zA_isWeak)
             box.delete(array.shift(zA_box))
             label.delete(array.shift(zA_lbl))
             label.delete(array.shift(zA_wkLbl))
@@ -378,6 +381,7 @@ while idx < array.size(zA_top)
                     array.set(zA_inTest,  idx, true)
                     activateBox(bx, lb, origin, top, bot, 1, tst, dlog,
                          array.get(zA_curTrack, idx), true)
+                    array.set(zA_isWeak, idx, iw)
                     updateWkLbl(wkLb, iw, bot, 1)
 
             else  // st == 4
@@ -400,6 +404,7 @@ while idx < array.size(zA_top)
                             tst += 1
                             array.set(zA_tests,   idx, tst)
                             array.set(zA_inTest,  idx, true)
+                            array.set(zA_isWeak,  idx, iw)
                             updateWkLbl(wkLb, iw, bot, 1)
                     curTests  = array.get(zA_tests,   idx)
                     curInTest = array.get(zA_inTest,  idx)
@@ -408,7 +413,13 @@ while idx < array.size(zA_top)
                     box.set_right(bx,  bar_index)
                     label.set_xy(lb,   bar_index + 1, (top + bot) / 2.0)
                     label.set_text(lb, "Resistance Region - " + str.tostring(curTests) + " tests | Depth: " + dd)
-                    label.set_xy(wkLb, bar_index + 1, bot)
+                    wkShow = array.get(zA_isWeak, idx)
+                    if wkShow and not curInTest
+                        curMxPrev = array.get(zA_maxPrev, idx)
+                        liveD     = bot - array.get(zA_curTrack, idx)
+                        if curMxPrev > 0.0 and liveD >= curMxPrev
+                            wkShow := false
+                    updateWkLbl(wkLb, wkShow, bot, 1)
 
         else  // ── Support ───────────────────────────────────────────────────
             if st == 0
@@ -454,6 +465,7 @@ while idx < array.size(zA_top)
                     array.set(zA_inTest,  idx, true)
                     activateBox(bx, lb, origin, top, bot, -1, tst, dlog,
                          array.get(zA_curTrack, idx), true)
+                    array.set(zA_isWeak, idx, iw)
                     updateWkLbl(wkLb, iw, top, -1)
 
             else  // st == 4
@@ -476,6 +488,7 @@ while idx < array.size(zA_top)
                             tst += 1
                             array.set(zA_tests,   idx, tst)
                             array.set(zA_inTest,  idx, true)
+                            array.set(zA_isWeak,  idx, iw)
                             updateWkLbl(wkLb, iw, top, -1)
                     curTests  = array.get(zA_tests,   idx)
                     curInTest = array.get(zA_inTest,  idx)
@@ -484,7 +497,13 @@ while idx < array.size(zA_top)
                     box.set_right(bx,  bar_index)
                     label.set_xy(lb,   bar_index + 1, (top + bot) / 2.0)
                     label.set_text(lb, "Support Region - " + str.tostring(curTests) + " tests | Depth: " + dd)
-                    label.set_xy(wkLb, bar_index + 1, top)
+                    wkShow = array.get(zA_isWeak, idx)
+                    if wkShow and not curInTest
+                        curMxPrev = array.get(zA_maxPrev, idx)
+                        liveD     = array.get(zA_curTrack, idx) - top
+                        if curMxPrev > 0.0 and liveD >= curMxPrev
+                            wkShow := false
+                    updateWkLbl(wkLb, wkShow, top, -1)
 
     if failed
         box.delete(bx)
@@ -501,6 +520,7 @@ while idx < array.size(zA_top)
         array.remove(zA_depthLog, idx)
         array.remove(zA_lastDep,  idx)
         array.remove(zA_maxPrev,  idx)
+        array.remove(zA_isWeak,   idx)
         array.remove(zA_box,      idx)
         array.remove(zA_lbl,      idx)
         array.remove(zA_wkLbl,    idx)

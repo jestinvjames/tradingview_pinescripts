@@ -9,6 +9,7 @@ i_lookback = input.int(300, "Zone Lookback (bars)",      minval=10,
                group="Swing Detection",
                tooltip="Zones whose pivot is older than this many bars are automatically removed.")
 
+i_show     = input.string("Both", "Show Zones", group="Zone Appearance", options=["Both","Resistance Only","Support Only"])
 i_rColor   = input.color(color.new(color.red,   70), "Resistance Color", group="Zone Appearance")
 i_sColor   = input.color(color.new(color.green, 70), "Support Color",    group="Zone Appearance")
 i_bgTrans  = input.int(85, "Background Transparency",   minval=0, maxval=100, group="Zone Appearance")
@@ -191,13 +192,16 @@ addZone(top, bot, pivotBar, ztp) =>
             label.delete(array.shift(zA_lbl))
 
 // ─── Register new pivots ──────────────────────────────────────────────────────
-if isMarkHigh
+showResist = i_show != "Support Only"
+showSupport = i_show != "Resistance Only"
+
+if isMarkHigh and showResist
     zT = high[i_n]
     zB = math.max(open[i_n], close[i_n])
     if zT > zB
         addZone(zT, zB, bar_index - i_n, 1)
 
-if isMarkLow
+if isMarkLow and showSupport
     zB = low[i_n]
     zT = math.min(open[i_n], close[i_n])
     if zT > zB

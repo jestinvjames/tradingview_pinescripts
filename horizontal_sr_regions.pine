@@ -1,45 +1,5 @@
 //@version=6
-indicator(
-     title       = "Horizontal Support & Resistance Regions",
-     description =
-"Horizontal Support & Resistance Regions — Jestin V James\n" +
-"\n" +
-"A powerful tool for breakout traders. This indicator automatically identifies horizontal support and resistance zones from swing pivots, tracks how many times each zone has been tested, and measures the depth of each pullback before a test. Together these signals reveal whether a zone is holding strong or progressively weakening — giving breakout traders an edge in timing entries.\n" +
-"\n" +
-"━━ HOW IT WORKS ━━\n" +
-"Each zone is anchored to a swing pivot:\n" +
-"  • Resistance zone — formed at a swing high. The zone spans from the candle body top up to the wick high.\n" +
-"  • Support zone — formed at a swing low. The zone spans from the wick low up to the candle body bottom.\n" +
-"\n" +
-"A zone is only displayed once price has exited it and then re-tested it at least twice, confirming it as a genuine level rather than noise.\n" +
-"\n" +
-"━━ DEPTH TRACKING ━━\n" +
-"For every test, the indicator records the pullback depth — how far price retreated from the zone before returning to test it again:\n" +
-"  • Resistance depth: zone bottom − minimum low during the pullback\n" +
-"  • Support depth: maximum high during the pullback − zone top\n" +
-"\n" +
-"Depths are shown as a comma-separated list on the zone label (e.g. '32, 18, 9'). A live depth is also shown during the current pullback so you can watch it develop in real time.\n" +
-"\n" +
-"Shallower pullbacks with each successive test mean buyers/sellers are returning to the zone more eagerly — a classic sign the zone is about to break.\n" +
-"\n" +
-"━━ WEAKENING SIGNALS ━━\n" +
-"Two warning badges appear on the zone when weakness is detected:\n" +
-"  • 'Depths decreasing - zone weakening' — every successive pullback depth has been strictly smaller than the one before it. This is the strongest signal that the zone is losing its power.\n" +
-"  • 'latest test depth has been weaker' — the most recent pullback was shallower than the maximum of all prior pullbacks for that zone.\n" +
-"\n" +
-"Both badges are automatically suppressed when the current pullback already exceeds the last recorded depth, avoiding false warnings when price shows renewed momentum away from the zone.\n" +
-"\n" +
-"━━ ALERT ━━\n" +
-"A configurable alert ('Zone Depths Decreasing') fires on every bar that the 'Depths decreasing' badge is active. Set it to 'Once Per Bar Close' to receive one notification per candle — ideal for monitoring zones in real time without watching the chart.\n" +
-"\n" +
-"━━ SETTINGS ━━\n" +
-"  • Lookback / Lookahead Bars: Swing detection sensitivity — match this to your Swing High/Low Dots indicator setting.\n" +
-"  • Zone Lookback (bars): Zones older than this are automatically removed to keep the chart clean.\n" +
-"  • Show Zones: Display resistance only, support only, or both.\n" +
-"  • Colors, Transparency, Border Style / Width: Full appearance customisation.",
-     overlay     = true,
-     max_boxes_count  = 100,
-     max_labels_count = 200)
+indicator("Horizontal Support & Resistance Regions", overlay=true, max_boxes_count=100, max_labels_count=200)
 
 // ─── Inputs ───────────────────────────────────────────────────────────────────
 i_n        = input.int(2,   "Lookback / Lookahead Bars", minval=1, maxval=20,

@@ -167,6 +167,11 @@ manage_kz(KZ kz, bool enabled, string sess, string tz, color col, string name) =
                     kz.lo_lines.get(0).set_y1(kz.lo)
                     kz.lo_lines.get(0).set_y2(kz.lo)
                     kz.lo_lines.get(0).set_x2(bar_index + 1)
+                if show_lbl
+                    if kz.hi_labels.size() > 0
+                        kz.hi_labels.get(0).set_y(kz.hi)
+                    if kz.lo_labels.size() > 0
+                        kz.lo_labels.get(0).set_y(kz.lo)
 
         // ── Every bar outside session: pull all lines to latest candle ────────
         // Guard each loop explicitly — Pine Script executes `for i = 0 to -1`
@@ -190,9 +195,9 @@ manage_kz(KZ kz, bool enabled, string sess, string tz, color col, string name) =
 //                                session string        timezone
 manage_kz(as_kz, show_as, "0900-1500:1234567", "Asia/Tokyo",        as_col, "Asia Early")
 manage_kz(al_kz, show_al, "1500-1900:1234567", "Asia/Tokyo",        al_col, "Asia Late")
-manage_kz(fr_kz, show_fr, "0900-1000:12345",   "Europe/Berlin",     fr_col, "Frankfurt")
-manage_kz(lo_kz, show_lo, "0800-1100:12345",   "Europe/London",     lo_col, "London")
-manage_kz(ne_kz, show_ne, "0700-0930:12345",   "America/New_York",  ne_col, "NY Early")
-manage_kz(na_kz, show_na, "0930-1100:12345",   "America/New_York",  na_col, "NY AM")
-manage_kz(nl_kz, show_nl, "1200-1300:12345",   "America/New_York",  nl_col, "NY Lunch")
-manage_kz(np_kz, show_np, "1330-1600:12345",   "America/New_York",  np_col, "NY PM")
+manage_kz(fr_kz, show_fr, "0900-1000:23456",   "Europe/Berlin",     fr_col, "Frankfurt")
+manage_kz(lo_kz, show_lo, "0800-1100:23456",   "Europe/London",     lo_col, "London")
+manage_kz(ne_kz, show_ne, "0700-0930:23456",   "America/New_York",  ne_col, "NY Early")
+manage_kz(na_kz, show_na, "0930-1100:23456",   "America/New_York",  na_col, "NY AM")
+manage_kz(nl_kz, show_nl, "1200-1300:23456",   "America/New_York",  nl_col, "NY Lunch")
+manage_kz(np_kz, show_np, "1330-1600:23456",   "America/New_York",  np_col, "NY PM")

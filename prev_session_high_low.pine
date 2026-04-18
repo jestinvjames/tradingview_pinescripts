@@ -1,0 +1,140 @@
+//@version=6
+indicator("Previous Session High Low", "Prev Session HL", overlay = true, max_lines_count = 500, max_labels_count = 500)
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+line_style_opt(s) =>
+    switch s
+        "Solid"  => line.style_solid
+        "Dotted" => line.style_dotted
+        "Dashed" => line.style_dashed
+
+label_size_opt(s) =>
+    switch s
+        "Auto"   => size.auto
+        "Tiny"   => size.tiny
+        "Small"  => size.small
+        "Normal" => size.normal
+        "Large"  => size.large
+        "Huge"   => size.huge
+
+// ── Inputs ────────────────────────────────────────────────────────────────────
+var g_D  = "Previous Day  ·  intraday charts only"
+show_dh  = input.bool(true,     "High", inline = "DH", group = g_D)
+dh_col   = input.color(#26a69a, "",     inline = "DH", group = g_D)
+show_dl  = input.bool(true,     "Low",  inline = "DL", group = g_D)
+dl_col   = input.color(#ef5350, "",     inline = "DL", group = g_D)
+
+var g_W  = "Previous Week  ·  intraday & daily only"
+show_wh  = input.bool(true,     "High", inline = "WH", group = g_W)
+wh_col   = input.color(#1e88e5, "",     inline = "WH", group = g_W)
+show_wl  = input.bool(true,     "Low",  inline = "WL", group = g_W)
+wl_col   = input.color(#fb8c00, "",     inline = "WL", group = g_W)
+
+var g_M  = "Previous Month  ·  intraday, daily & weekly only"
+show_mh  = input.bool(true,     "High", inline = "MH", group = g_M)
+mh_col   = input.color(#9c27b0, "",     inline = "MH", group = g_M)
+show_ml  = input.bool(true,     "Low",  inline = "ML", group = g_M)
+ml_col   = input.color(#ff5722, "",     inline = "ML", group = g_M)
+
+var g_A  = "Appearance"
+ln_style = line_style_opt(input.string("Solid", "Style",   options = ["Solid", "Dotted", "Dashed"], inline = "LS", group = g_A))
+ln_width = input.int(1, "",  1, 4,                                                                   inline = "LS", group = g_A)
+show_lbl = input.bool(true,  "Labels",                                                               inline = "LB", group = g_A)
+lbl_sz   = label_size_opt(input.string("Small", "", options = ["Auto", "Tiny", "Small", "Normal", "Large", "Huge"], inline = "LB", group = g_A))
+keep     = input.int(3, "Keep N previous", 1, 10, group = g_A)
+
+// ── Timeframe guards ──────────────────────────────────────────────────────────
+// timeframe.change() uses syminfo.timezone internally, so exchange day
+// boundaries are respected automatically (e.g. NASDAQ on an IST chart).
+can_d = timeframe.isintraday
+can_w = timeframe.isintraday or timeframe.isdaily
+can_m = timeframe.isintraday or timeframe.isdaily or timeframe.isweekly
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+type Level
+    array<line>  lines
+    array<label> labels
+
+type Period
+    string tf
+    float  h  = na
+    float  l  = na
+    float  ph = na
+    float  pl = na
+
+// ── State ─────────────────────────────────────────────────────────────────────
+var d = Period.new("D")
+var w = Period.new("W")
+var m = Period.new("M")
+
+var dh_lvl = Level.new(array.new_line(), array.new_label())
+var dl_lvl = Level.new(array.new_line(), array.new_label())
+var wh_lvl = Level.new(array.new_line(), array.new_label())
+var wl_lvl = Level.new(array.new_line(), array.new_label())
+var mh_lvl = Level.new(array.new_line(), array.new_label())
+var ml_lvl = Level.new(array.new_line(), array.new_label())
+
+var T = color.new(color.white, 100)
+
+// ── Functions ─────────────────────────────────────────────────────────────────
+
+track(Period p) =>
+    if timeframe.change(p.tf)
+        p.ph := p.h
+        p.pl := p.l
+        p.h  := high
+        p.l  := low
+    else
+        p.h := math.max(nz(p.h, high), high)
+        p.l := math.min(nz(p.l, low),  low)
+
+extend_last(Level lvl) =>
+    if lvl.lines.size() > 0
+        lvl.lines.get(0).set_x2(time)
+    if show_lbl and lvl.labels.size() > 0
+        lvl.labels.get(0).set_x(time)
+
+stamp(Level lvl, float price, color col, string txt) =>
+    if not na(price)
+        lvl.lines.unshift(
+             line.new(time, price, time, price,
+             xloc  = xloc.bar_time,
+             color = col,
+             style = ln_style,
+             width = ln_width))
+        if show_lbl
+            lvl.labels.unshift(
+                 label.new(time, price, txt,
+                 xloc      = xloc.bar_time,
+                 style     = label.style_label_left,
+                 color     = T,
+                 textcolor = col,
+                 size      = lbl_sz))
+        if lvl.lines.size() > keep
+            lvl.lines.pop().delete()
+        if lvl.labels.size() > keep
+            lvl.labels.pop().delete()
+
+draw(Period p, bool can,
+     bool use_h, Level hl, color hc, string h_txt,
+     bool use_l, Level ll, color lc, string l_txt) =>
+    if can
+        extend_last(hl)
+        extend_last(ll)
+        if timeframe.change(p.tf)
+            if use_h
+                stamp(hl, p.ph, hc, h_txt)
+            if use_l
+                stamp(ll, p.pl, lc, l_txt)
+
+// ── Per-bar execution ─────────────────────────────────────────────────────────
+if can_d
+    track(d)
+if can_w
+    track(w)
+if can_m
+    track(m)
+
+draw(d, can_d, show_dh, dh_lvl, dh_col, "PDH", show_dl, dl_lvl, dl_col, "PDL")
+draw(w, can_w, show_wh, wh_lvl, wh_col, "PWH", show_wl, wl_lvl, wl_col, "PWL")
+draw(m, can_m, show_mh, mh_lvl, mh_col, "PMH", show_ml, ml_lvl, ml_col, "PML")

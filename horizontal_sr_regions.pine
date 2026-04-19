@@ -342,6 +342,7 @@ if isMarkLow and showSupport
 
 // ─── Per-bar update loop ──────────────────────────────────────────────────────
 anyDecr = false   // set true this bar if any zone displays "Depths decreasing"
+anyWeak = false   // set true this bar if any zone's latest depth is weaker than a prior one
 idx = 0
 while idx < array.size(zA_top)
     top     = array.get(zA_top,     idx)
@@ -460,6 +461,7 @@ while idx < array.size(zA_top)
                             wkAllDec := false
                     updateWkLbl(wkLb, wkShow, wkAllDec, bot)
                     anyDecr := anyDecr or wkAllDec
+                    anyWeak := anyWeak or wkShow
 
         else  // ── Support ───────────────────────────────────────────────────
             if st == 0
@@ -554,6 +556,7 @@ while idx < array.size(zA_top)
                             wkAllDec := false
                     updateWkLbl(wkLb, wkShow, wkAllDec, top)
                     anyDecr := anyDecr or wkAllDec
+                    anyWeak := anyWeak or wkShow
 
     if failed
         box.delete(bx)
@@ -583,3 +586,9 @@ while idx < array.size(zA_top)
 alertcondition(anyDecr,
      title   = "Zone Depths Decreasing",
      message = "A S/R zone is showing consistently decreasing test depths — zone may be weakening.")
+alertcondition(anyWeak,
+     title   = "Zone Latest Test Depth Weaker",
+     message = "A S/R zone's latest test depth is shallower than a previous one — zone may be losing strength.")
+alertcondition(anyWeak or anyDecr,
+     title   = "Zone Weakening (Any)",
+     message = "A S/R zone is showing signs of weakening — latest test depth weaker or all depths consistently decreasing.")

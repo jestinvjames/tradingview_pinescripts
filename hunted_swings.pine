@@ -6,17 +6,59 @@ shColor   = input.color(color.red,              "Hunted Swing High Color")
 slColor   = input.color(color.teal,             "Hunted Swing Low Color")
 lineWidth = input.int(2, "Line Width",           minval=1, maxval=4)
 styleOpt  = input.string("dashed", "Line Style", options=["solid", "dashed", "dotted"])
+swingBars = input.int(2, "Swing Bars (Lookback & Lookahead)", minval=1, maxval=10)
+swingLB   = swingBars
+swingLA   = swingBars
 
 lstyle = switch styleOpt
     "solid"  => line.style_solid
     "dashed" => line.style_dashed
     => line.style_dotted
 
-// === Swing Detection — 2-bar rule + equal pairs (same as swing_high_low_dots) ===
-isSwingHigh     = high[4] < high[2] and high[3] < high[2] and high[1] < high[2] and high[0] < high[2]
-isSwingLow      = low[4]  > low[2]  and low[3]  > low[2]  and low[1]  > low[2]  and low[0]  > low[2]
-isEqualHighPair = high[3] == high[2] and high[2] > high[5] and high[2] > high[4] and high[2] > high[1] and high[2] > high[0]
-isEqualLowPair  = low[3]  == low[2]  and low[2]  < low[5]  and low[2]  < low[4]  and low[2]  < low[1]  and low[2]  < low[0]
+// === Swing Detection — configurable lookback/lookahead ===
+// Center bar is at bar[swingLA]; check swingLB bars left and swingLA bars right.
+
+isSwingHigh = true
+for j = 1 to swingLB
+    if high[swingLA + j] >= high[swingLA]
+        isSwingHigh := false
+        break
+for j = 0 to swingLA - 1
+    if high[j] >= high[swingLA]
+        isSwingHigh := false
+        break
+
+isSwingLow = true
+for j = 1 to swingLB
+    if low[swingLA + j] <= low[swingLA]
+        isSwingLow := false
+        break
+for j = 0 to swingLA - 1
+    if low[j] <= low[swingLA]
+        isSwingLow := false
+        break
+
+// Equal pairs: two adjacent equal highs/lows that dominate all surrounding bars
+isEqualHighPair = high[swingLA + 1] == high[swingLA]
+for j = 0 to swingLA - 1
+    if high[j] >= high[swingLA]
+        isEqualHighPair := false
+        break
+for j = 2 to swingLB + 1
+    if high[swingLA + j] >= high[swingLA]
+        isEqualHighPair := false
+        break
+
+isEqualLowPair = low[swingLA + 1] == low[swingLA]
+for j = 0 to swingLA - 1
+    if low[j] <= low[swingLA]
+        isEqualLowPair := false
+        break
+for j = 2 to swingLB + 1
+    if low[swingLA + j] <= low[swingLA]
+        isEqualLowPair := false
+        break
+
 isMarkHigh = isSwingHigh or isEqualHighPair
 isMarkLow  = isSwingLow  or isEqualLowPair
 
@@ -33,14 +75,14 @@ isMarkLow  = isSwingLow  or isEqualLowPair
 //   Pending: a newer, higher SH formed above pendingSH (indirectly sweeping it);
 //            confirmed hunted when price closes below pendingSH
 // ═══════════════════════════════════════════════════════════════════
-var float lastSH      = na   // level of current tracked swing high
-var int   lastSH_i    = na   // bar index where it was detected
-var bool  shSwept     = false // true once high > lastSH
-var float pendingSH   = na   // indirectly-swept SH awaiting close-below
+var float lastSH      = na
+var int   lastSH_i    = na
+var bool  shSwept     = false
+var float pendingSH   = na
 var int   pendingSH_i = na
-var line  huntSHLine  = na   // the one visible hunted-SH line
-var float huntSH_lvl  = na   // level of the visible hunted-SH line (for mitigation)
-var int   huntSH_bar  = na   // bar index when the hunt line was drawn
+var line  huntSHLine  = na
+var float huntSH_lvl  = na
+var int   huntSH_bar  = na
 
 // ═══════════════════════════════════════════════════════════════════
 // SWING LOW HUNT STATE  (mirror of above)
@@ -51,26 +93,22 @@ var bool  slSwept     = false
 var float pendingSL   = na
 var int   pendingSL_i = na
 var line  huntSLLine  = na
-var float huntSL_lvl  = na   // level of the visible hunted-SL line (for mitigation)
-var int   huntSL_bar  = na   // bar index when the hunt line was drawn
+var float huntSL_lvl  = na
+var int   huntSL_bar  = na
 
 // ─── SWING HIGH LOGIC ───────────────────────────────────────────────────────
 
 // Step 1 — new swing high confirmed
 if isMarkHigh
-    if not na(lastSH) and high[2] > lastSH
-        // New SH is higher: the old SH was swept on the way up.
-        // Keep the LOWER of existing pendingSH vs lastSH — the lowest swept
-        // level is the meaningful liquidity pool; newer higher ones are skipped.
+    if not na(lastSH) and high[swingLA] > lastSH
         if na(pendingSH) or lastSH < pendingSH
             pendingSH   := lastSH
             pendingSH_i := lastSH_i
-    lastSH   := high[2]
-    lastSH_i := bar_index - 2
+    lastSH   := high[swingLA]
+    lastSH_i := bar_index - swingLA
     shSwept  := false
 
 // Step 2 — mitigation: price revisits the hunted SH level → remove line
-// Guard: only mitigate on bars AFTER the line was drawn (sweep bar's high already exceeded the level)
 if not na(huntSH_lvl) and high >= huntSH_lvl and bar_index > huntSH_bar
     line.delete(huntSHLine)
     huntSHLine := na
@@ -110,19 +148,15 @@ if not na(huntSHLine)
 
 // Step 1 — new swing low confirmed
 if isMarkLow
-    if not na(lastSL) and low[2] < lastSL
-        // New SL is lower: the old SL was swept on the way down.
-        // Keep the HIGHER of existing pendingSL vs lastSL — the highest swept
-        // level is the meaningful liquidity pool; newer lower ones are skipped.
+    if not na(lastSL) and low[swingLA] < lastSL
         if na(pendingSL) or lastSL > pendingSL
             pendingSL   := lastSL
             pendingSL_i := lastSL_i
-    lastSL   := low[2]
-    lastSL_i := bar_index - 2
+    lastSL   := low[swingLA]
+    lastSL_i := bar_index - swingLA
     slSwept  := false
 
 // Step 2 — mitigation: price revisits the hunted SL level → remove line
-// Guard: only mitigate on bars AFTER the line was drawn (sweep bar's low already broke the level)
 if not na(huntSL_lvl) and low <= huntSL_lvl and bar_index > huntSL_bar
     line.delete(huntSLLine)
     huntSLLine := na

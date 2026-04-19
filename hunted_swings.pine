@@ -9,6 +9,8 @@ styleOpt  = input.string("dashed", "Line Style", options=["solid", "dashed", "do
 swingBars = input.int(2, "Swing Bars (Lookback & Lookahead)", minval=1, maxval=10)
 swingLB   = swingBars
 swingLA   = swingBars
+showDots  = input.bool(false, "Show Swing Dots", group="Swing Dots")
+dotSize   = input.string("small", "Dot Size", options=["tiny", "small", "normal", "large", "huge"], group="Swing Dots")
 
 lstyle = switch styleOpt
     "solid"  => line.style_solid
@@ -191,6 +193,19 @@ if slHuntedDirect
 // Step 5 — extend visible line to the current bar every tick
 if not na(huntSLLine)
     line.set_x2(huntSLLine, bar_index)
+
+// === Swing Dots ===
+plotshape(showDots and isMarkLow  and dotSize == "tiny",   style=shape.circle, location=location.belowbar, color=slColor, size=size.tiny,   offset=-swingBars, editable=false, display=display.pane)
+plotshape(showDots and isMarkLow  and dotSize == "small",  style=shape.circle, location=location.belowbar, color=slColor, size=size.small,  offset=-swingBars, editable=false, display=display.pane)
+plotshape(showDots and isMarkLow  and dotSize == "normal", style=shape.circle, location=location.belowbar, color=slColor, size=size.normal, offset=-swingBars, editable=false, display=display.pane)
+plotshape(showDots and isMarkLow  and dotSize == "large",  style=shape.circle, location=location.belowbar, color=slColor, size=size.large,  offset=-swingBars, editable=false, display=display.pane)
+plotshape(showDots and isMarkLow  and dotSize == "huge",   style=shape.circle, location=location.belowbar, color=slColor, size=size.huge,   offset=-swingBars, editable=false, display=display.pane)
+
+plotshape(showDots and isMarkHigh and dotSize == "tiny",   style=shape.circle, location=location.abovebar, color=shColor, size=size.tiny,   offset=-swingBars, editable=false, display=display.pane)
+plotshape(showDots and isMarkHigh and dotSize == "small",  style=shape.circle, location=location.abovebar, color=shColor, size=size.small,  offset=-swingBars, editable=false, display=display.pane)
+plotshape(showDots and isMarkHigh and dotSize == "normal", style=shape.circle, location=location.abovebar, color=shColor, size=size.normal, offset=-swingBars, editable=false, display=display.pane)
+plotshape(showDots and isMarkHigh and dotSize == "large",  style=shape.circle, location=location.abovebar, color=shColor, size=size.large,  offset=-swingBars, editable=false, display=display.pane)
+plotshape(showDots and isMarkHigh and dotSize == "huge",   style=shape.circle, location=location.abovebar, color=shColor, size=size.huge,   offset=-swingBars, editable=false, display=display.pane)
 
 // === Alerts ===
 alertcondition(shHunted or shHuntedDirect, "Swing High Hunted", "Swing High has been hunted")
